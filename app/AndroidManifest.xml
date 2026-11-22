@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- versionCode / versionName 刻意不写在这里：由 app/version.py 按源码树内容派生，
+     build.sh 在 aapt2 link 时用命令行参数注入（version-code / version-name）。
+     实测：aapt2 只在这个属性不存在时才注入，一旦这里写了值，命令行参数会被忽略。
+     所以不要再把版本号加回来，否则同步脚本会拿着一个永远不变的值判"已是最新"。
+     设备侧升级判据就是 versionCode，见 tools/sync_devices.py。
+     注意 XML 注释里不能出现连续两个 ASCII 连字符，写参数名时别带前缀。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.magicpig.piano">
+
+    <uses-sdk
+        android:minSdkVersion="26"
+        android:targetSdkVersion="34" />
+
+    <!-- 本 App 完全离线：曲谱一律由外部拷贝进
+         sdcard/Android/data/com.magicpig.piano/files/sheets/&lt;乐曲uuid&gt;/，
+         不申请任何网络权限（下载链路与令牌已整体删除，见 SheetFetcher 的注释）。 -->
+
+    <!-- 演奏（跟弹）模式要听现场钢琴：只收原始 PCM，不做语音识别/不录音落盘 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="魔术钢琴房"
+        android:largeHeap="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name="com.magicpig.piano.HomeActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 资源包导入：APK 不带曲谱数据，首次进入先到这一页选 zip 导入 -->
+        <activity
+            android:name="com.magicpig.piano.ImportActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
+            android:name="com.magicpig.piano.PlayerActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 乐谱详情页：一本乐谱下面的全部乐曲 -->
+        <activity
+            android:name="com.magicpig.piano.AlbumDetailActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- 逆向探针：保留用于排查 native 链路，不设 launcher。
+             exported 必须留 true —— 实测 Android 15 上 `am start`（shell uid 2000）
+             启动未导出 Activity 会直接 SecurityException，探针就废了。
+             改用 DUMP 权限兜住暴露面：shell 持有 DUMP 能启动，第三方 App 没有该权限。
+             （早先只写 exported=true 无权限限制，等于任何应用都能拉起探针。） -->
+        <activity
+            android:name="com.magicpig.piano.MainActivity"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:screenOrientation="landscape" />
+    </application>
+</manifest>

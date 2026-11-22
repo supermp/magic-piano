@@ -1,0 +1,29 @@
+# 本机配置与凭据
+local.env
+app/debug.keystore
+
+# 本机工作区
+dist/
+cache/
+reference/
+tmp/
+library/
+
+# Android 构建状态与生成的本地资源
+app/build/
+app/version-code.txt
+app/res/
+
+# 第三方运行资产
+app/lib/
+app/assets/algo_assets/
+app/assets/fonts/
+app/assets/sheetShow/
+app/assets/ui/images/
+
+# 本机工具缓存与会话记录、Python 与系统缓存（不入库）
+.workbuddy/
+__pycache__/
+*.pyc
+Thumbs.db
+.DS_Store
