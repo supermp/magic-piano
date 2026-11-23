@@ -2,9 +2,7 @@
 
 > 当前有效的仓库地图与维护约束。改动后同步本文。
 >
-> **注释与文档只写当前状态**：不写「某年某月某日改了什么」「用户某日要求过什么」这类时间线，
-> 也不写"曾经如何"的变更史。要禁止某种做法时，写成不带时间的约束（如「不要给起播加第二条预热轨」）。
-> 过程与时间线写在**本机工作笔记**里（已在 `.gitignore` 中排除，不入库）；本文和代码注释都不承担这个职责。
+> **注释与文档只写当前状态**：不写「某年某月某日改了什么」「用户某日要求过什么」这类时间线，也不写"曾经如何"的变更史。要禁止某种做法时，写成不带时间的约束（如「不要给起播加第二条预热轨」）。过程与时间线写在**本机工作笔记**里（已在 `.gitignore` 中排除，不入库）；本文和代码注释都不承担这个职责。
 
 ## 1. 项目与边界
 
@@ -25,15 +23,13 @@
 - 曲库目录、封面、谱包、版本清单、资源包；
 - 原版参照 APK、本机构建产物、交付 APK、凭据与本机配置。
 
-这些资产和数据的来源不代表已获公开授权；恢复跟踪或单独分发前必须取得授权或替换。
-`SheetTrim` 仍含部分反编译恢复代码，公开前也需单独审查。不得提交 `local.env` 或 `app/debug.keystore`。
+这些资产和数据的来源不代表已获公开授权；恢复跟踪或单独分发前必须取得授权或替换。`SheetTrim` 仍含部分反编译恢复代码，公开前也需单独审查。不得提交 `local.env` 或 `app/debug.keystore`。
 
 源码里不要留这几类东西：
 
 - 本机绝对路径、设备序列号、局域网 IP、账号邮箱；
 - 服务端令牌（只在 `local.env`，App 侧已彻底没有）；
-- 具体曲谱/曲集 uuid —— 需要样本时用"运行时发现"（如 `MainActivity.firstSheetEnc()`），
-  写死会在曲库更新后被下架而失效；
+- 具体曲谱/曲集 uuid —— 需要样本时用"运行时发现"（如 `MainActivity.firstSheetEnc()`），写死会在曲库更新后被下架而失效；
 - 探针 Activity 不能裸 `exported=true`，必须带 `android:permission`（见 §4）。
 
 ## 2. 目录
@@ -94,9 +90,7 @@ python tools/deploy.py --apk-only --serial <serial>
 
 规则：
 
-- `build.sh` 结尾自动把产物复制成 `dist/magicpiano-<versionName>.apk`（如 `magicpiano-20261123.apk`），
-  并删除 `dist/magicpiano-*.apk` 里的其它文件 —— **交付目录始终只有一个 APK**，不会拿旧包冒充。
-  曲库包（`magicpiano-library-*.zip`）和资产包不受影响。
+- `build.sh` 结尾自动把产物复制成 `dist/magicpiano-<versionName>.apk`（如 `magicpiano-20261123.apk`），并删除 `dist/magicpiano-*.apk` 里的其它文件 —— **交付目录始终只有一个 APK**，不会拿旧包冒充。曲库包（`magicpiano-library-*.zip`）和资产包不受影响。
 - 文件名用 versionName，同一天多次构建会重名覆盖；先后只能看 versionCode（见「版本号」）。
 - 开发资产包 `dist/magicpiano-runtime-assets.zip`（文件名固定）解压到仓库根目录，再生成图片、构建。
 - 交付物统一放 `dist/`；`deploy.py` / `sync_devices.py` 默认取最新的 `magicpiano-*.apk`（可用 `--apk` 指定）。
@@ -110,10 +104,8 @@ python tools/deploy.py --apk-only --serial <serial>
 
 `version.py` 生成 `versionCode=YYMMDDNNN`、`versionName=YYYYMMDD`：
 
-- versionName 由 versionCode **直接截取日期**（`261123003` → `20261123`），同一天多次构建显示值相同；
-  先后顺序只能看 versionCode（交付文件名用的是 versionName，不含它）。
-- 不引入任何人维护的常量：`version.py` 参与内容 hash，改规则必然涨号；
-  否则「名称变了、code 没变」，`sync_devices.py` 会判成版本相同而跳过安装。
+- versionName 由 versionCode **直接截取日期**（`261123003` → `20261123`），同一天多次构建显示值相同；先后顺序只能看 versionCode（交付文件名用的是 versionName，不含它）。
+- 不引入任何人维护的常量：`version.py` 参与内容 hash，改规则必然涨号；否则「名称变了、code 没变」，`sync_devices.py` 会判成版本相同而跳过安装。
 - 同源码重编复用；内容变化则递增当天序号；换天从 001 开始。
 - 序号到 999 或系统时间回拨导致不单调时直接失败，不回绕。
 - 不用 11 位日期码（超出 int32）或 8 位 `YYMMDDNN`（可能小于旧版本而被拒绝升级）。
@@ -140,8 +132,7 @@ python tools/deploy.py --apk-only --serial <serial>
 | `EvalRating` | 解析音准、节奏、速度、总分 |
 | `Ui` / `FlowLayout` / `NineSliceDrawable` | 视觉规范、布局与九宫格 |
 
-探针的 `exported` 不能改成 `false`：`am start`（shell uid）启动未导出 Activity 会被
-`SecurityException` 拒绝，探针就废了；用 DUMP 权限挡第三方 App 是正解。
+探针的 `exported` 不能改成 `false`：`am start`（shell uid）启动未导出 Activity 会被 `SecurityException` 拒绝，探针就废了；用 DUMP 权限挡第三方 App 是正解。
 
 曲名唯一来源是 `catalog.json` 的 `name`，不要从 MusicXML 标题另建来源。
 
@@ -247,7 +238,7 @@ python tools/deploy.py --apk-only --serial <serial>
    python tools/update_catalog.py
    ```
 
-   查看 `cache/catalog/catalog_diff.json` 中新增、下架及 mtime 变化。无变化则停止。
+   查看 `cache/catalog/catalog_diff.json` 中新增、下架及 mtime 变化。无变化则停止。抓取途中任一接口失败、或分页累计数与 total 不一致都会直接中止，不写快照、差异或目录；重跑整次抓取，不要拿旧的 `catalog_full.json` 顶替。
 
 2. 确认后，用刚抓取的快照应用目录，不重复联网抓取：
 
@@ -262,11 +253,9 @@ python tools/deploy.py --apk-only --serial <serial>
    PY
    ```
 
-   写入格式固定为紧凑单行（`separators=(',', ':')`），与 `update_catalog.py --write` 一致；
-   换用别的缩进会让整份目录产生无意义的全文件 diff。
+   写入格式固定为紧凑单行（`separators=(',', ':')`），与 `update_catalog.py --write` 一致；换用别的缩进会让整份目录产生无意义的全文件 diff。
 
-   `update_catalog.py --write` 会用**同一次抓取**的结果直接覆盖目录（不会再抓一遍），
-   但等于跳过人工复核 diff，通常不用。
+   `update_catalog.py --write` 会用**同一次抓取**的结果直接覆盖目录（不会再抓一遍），但等于跳过人工复核 diff，通常不用。
 
 3. 对 `sheets_mtime_changed` 的 uuid 删除对应本地旧 zip，再增量下载。下载器只按文件存在跳过，不删除就不会换新版；**不要手删设备 enc**：
 
@@ -320,5 +309,4 @@ python tools/deploy.py --apk-only --serial <serial>
 5. 交付前确认 `dist/` 里的 APK 晚于 `app/src` 与 `app/assets` 的最新改动。
 6. 本文只写当前状态与约束，不写临时曲库数量、设备序列号、本机路径或调试日志。
 
-仓库已 `git init`（含 `.gitignore` / `.gitattributes`）；不要擅自提交或推送。
-公开前用 `git status` / `git check-ignore` 再核对候选文件。
+仓库已 `git init`（含 `.gitignore` / `.gitattributes`）；不要擅自提交或推送。公开前用 `git status` / `git check-ignore` 再核对候选文件。

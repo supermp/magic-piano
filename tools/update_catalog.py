@@ -9,6 +9,8 @@
 鉴权头 x-access-token: <JWT>，令牌只读项目根 local.env 的 MAGIC_PIANO_TOKEN。
 App 内没有令牌；过期后需在本机配置中更新。
 
+任何一页接口失败、或分页累计数与 total 不符，都会中止整次抓取：不写快照、不写差异、更不会覆盖目录；失败被折叠成空列表，等于把整本曲集从目录里抹掉。
+
 用法：
     python tools/update_catalog.py              # 抓全量 + 对比 + 报告（不覆盖目录）
     python tools/update_catalog.py --write      # 抓全量并直接用本次结果覆盖 library/catalog.json
@@ -33,6 +35,8 @@ sys.path.insert(0, TOOLS)
 from local_config import get_local
 API = 'https://api.lianqinba.com/magic_piano/v1'
 ARGS = 'instrument=piano&area=38a08f66-f504-416f-9a24-bb058b85f3c0'
+# 分页大小；接口不一定遵守。末页判断不能只看本页条数，还要靠“没有新增曲集”兜底。
+PAGE_SIZE = 100
 CACHE_DIR = os.path.join(BASE, 'cache', 'catalog')
 CATALOG = os.path.join(BASE, 'library', 'catalog.json')
 
@@ -77,6 +81,18 @@ def get(path, extra=ARGS, retry=3):
     return None
 
 
+def must_get(path, extra=ARGS, what=''):
+    """取一页数据；拿不到就中止整次抓取。
+
+    接口失败与“这本曲集确实没有乐曲”是两回事：失败若按空列表处理，`--write` 会把整本曲集从目录里删掉，且看起来像一次正常更新。
+    """
+    r = get(path, extra)
+    if r is None:
+        raise SystemExit('抓取不完整，已中止（未写任何目录）：%s（%s）'
+                         % (what or path, path))
+    return r
+
+
 def zh(ml, fallback=''):
     if isinstance(ml, dict):
         return ml.get('zh') or ml.get('base') or ml.get('en') or fallback
@@ -93,16 +109,30 @@ def crawl():
         cu = c['uuid']
         cat = {'uuid': cu, 'name': zh(c.get('name_ML')), 'tags': []}
         print('[分类] %s' % cat['name'], flush=True)
-        tg = get('albums_v3/tags/%s' % cu)
-        for t in (tg or {}).get('all_tags') or []:
+        tg = must_get('albums_v3/tags/%s' % cu, what='分类「%s」的标签' % cat['name'])
+        for t in tg.get('all_tags') or []:
             tu = t['uuid']
             tag = {'uuid': tu, 'name': zh(t.get('name_ML'), t.get('name', '')), 'albums': []}
             page = 1
+            seen = set()
+            expected_total = None
             while True:
-                ab = get('albums_v3/albums/%s' % tu, '%s&page=%d&page_size=100' % (ARGS, page))
-                albums = (ab or {}).get('albums') or []
-                total = (ab or {}).get('total')
+                ab = must_get('albums_v3/albums/%s' % tu,
+                              '%s&page=%d&page_size=%d' % (ARGS, page, PAGE_SIZE),
+                              what='标签「%s」第 %d 页曲集' % (tag['name'], page))
+                albums = ab.get('albums') or []
+                total = ab.get('total')
+                if total is not None:
+                    if expected_total is None:
+                        expected_total = int(total)
+                    elif int(total) != expected_total:
+                        raise SystemExit('分页 total 变化（%s）：%s -> %s'
+                                         % (tag['name'], expected_total, total))
+                added = 0
                 for a in albums:
+                    if a['uuid'] in seen:
+                        continue
+                    seen.add(a['uuid'])
                     d = a.get('data') or {}
                     tag['albums'].append({
                         'uuid': a['uuid'],
@@ -114,14 +144,21 @@ def crawl():
                         'mtime': a.get('mtime', ''),
                         'ctime': a.get('ctime', ''),
                     })
-                if not albums:
+                    added += 1
+                # 空页，或服务端忽略 page 并重复返回同一页：没有新曲集就结束
+                if added == 0:
                     break
-                if total is not None and len(tag['albums']) >= int(total):
-                    break
-                if len(albums) < 100:
+                if expected_total is not None:
+                    if len(tag['albums']) >= expected_total:
+                        break
+                elif len(albums) < PAGE_SIZE:
+                    # 接口没给 total 时，只能靠"本页没满"判断末页
                     break
                 page += 1
                 time.sleep(0.25)
+            if expected_total is not None and len(tag['albums']) != expected_total:
+                raise SystemExit('分页不完整（%s）：预期 %s 本，实际 %d 本'
+                                 % (tag['name'], expected_total, len(tag['albums'])))
             print('   [标签] %-14s %d 本' % (tag['name'], len(tag['albums'])), flush=True)
             cat['tags'].append(tag)
             time.sleep(0.15)
@@ -132,14 +169,15 @@ def crawl():
     for cat in catalog['categories']:
         for tag in cat['tags']:
             for alb in tag['albums']:
-                sh = get('albums_v3/sheets/%s' % alb['uuid'])
-                sheets = (sh or {}).get('sheets') or []
+                sh = must_get('albums_v3/sheets/%s' % alb['uuid'],
+                              what='曲集「%s」（%s）的乐曲' % (alb['name'], alb['uuid']))
+                sheets = sh.get('sheets') or []
                 alb['sheets'] = [{
                     'uuid': s['uuid'],
                     'name': zh((s.get('data') or {}).get('name_ML'),
                                (s.get('data') or {}).get('name', '')),
-                    # 作曲家/编曲在**乐曲对象顶层**（composers_zh），不在 data 里 ——
-                    # 曾经误取 data.composers_zh，导致整库作曲家全空、曲集页第二行消失
+                    # 作曲家/编曲在**乐曲对象顶层**（composers_zh），不在 data 里：
+                    # 从 data 取会整库作曲家全空、曲集页第二行消失
                     'composer': s.get('composers_zh') or s.get('composers_base') or '',
                     'page': (s.get('data') or {}).get('page_in_book', '') or '',
                     'mtime': s.get('mtime', ''),

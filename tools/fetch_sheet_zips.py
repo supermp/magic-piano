@@ -37,7 +37,7 @@ WORKERS = 8
 RETRY = 3
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from update_catalog import TOKEN  # noqa: E402  令牌唯一来源：local.env 的 MAGIC_PIANO_TOKEN
+from update_catalog import auth_token  # noqa: E402  令牌首次联网时才读 local.env
 
 _lock = threading.Lock()
 _stats = {'ok': 0, 'skip': 0, 'fail': 0, 'bytes': 0}
@@ -47,7 +47,7 @@ _failed = []
 def post_urls(uuids):
     body = json.dumps({'uuid_array': uuids, 'type': 'album'}).encode('utf-8')
     req = urllib.request.Request(API, data=body, headers={
-        'x-access-token': TOKEN, 'Content-Type': 'application/json'})
+        'x-access-token': auth_token(), 'Content-Type': 'application/json'})
     for attempt in range(RETRY + 1):
         try:
             with urllib.request.urlopen(req, timeout=60) as f:
