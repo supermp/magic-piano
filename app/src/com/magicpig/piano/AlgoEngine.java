@@ -137,6 +137,11 @@ public final class AlgoEngine {
             if (mSheetXml == null || mSheetXml.isEmpty()) {
                 throw new IllegalStateException("decryptSheet 返回空：" + encPath);
             }
+            // 选段属于单首曲子：引擎是跨页面单例，不清的话上一首的 BEGIN/END
+            // 会在本曲 Player 起播时被 applyPlaySection 再下发一次
+            // （段号落在本曲范围内就只播那一段，超出范围则 setSection 失败）。
+            if (mPlaySection != null) Log.i(TAG, "换曲：清掉上一首的试听区间");
+            mPlaySection = null;
             // 先释放旧模块再建新的。预览模块是全局单例，直接对已存在的模块
             // 再 init 一次不会复位播放游标 —— 上一次会话停在哪，这回 dryRun
             // 就从哪开始算，最坏情况（上次停在曲尾）会算出「整曲 0 采样」，
