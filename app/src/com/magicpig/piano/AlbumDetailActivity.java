@@ -23,7 +23,7 @@ import java.util.List;
  *
  * 版式照原版曲集详情页（当年的参照截图已清理，只留结论）：
  *   左边一栏（羊皮纸底）：返回箭头浮在左上 → 曲集封面（正方形）→ 曲集名
- *   → UP 徽标 → 「♡ 收藏专辑」胶囊 → 底部「最近更新」；
+ *   → UP 徽标 → 「♡ 收藏专辑」胶囊；
  *   右边是一张占满的圆角米白卡片：表头「共 N 首乐曲 / 页码」加一条分隔线，
  *   下面每行是 曲名 + 作曲家 | 页码 | ♡收藏。
  *
@@ -38,10 +38,10 @@ public class AlbumDetailActivity extends Activity {
     /**
      * 是否显示「页码」这一列。
      *
-     * 服务端对很多曲集（尤其流行类，全库 43.6% 的条目）根本不给页码，
+     * 服务端对很多曲集（尤其流行类）根本不给页码，
      * 而原版是固定留 34dp 的空列 —— 整本都没页码时就是一列空白加一个「页码」表头。
      * 所以进曲集时先扫一遍：**一本里连一个页码都没有就整列隐藏**（表头也去掉）。
-     * 混合的（哪怕只有 1 首有，全库 42 本）仍然显示，否则那几首的页码就没地方放了。
+     * 混合的（哪怕只有 1 首有）仍然显示，否则那几首的页码就没地方放了。
      */
     private boolean mShowPageCol = true;
     private String mCategoryName = "";
@@ -331,7 +331,7 @@ public class AlbumDetailActivity extends Activity {
     }
 
     private void toggleFavAlbum() {
-        boolean fav = LibraryStore.get(this).toggleAlbum(mAlbum.uuid);
+        LibraryStore.get(this).toggleAlbum(mAlbum.uuid);
         refreshFavBtn();
     }
     private void renderList() {
@@ -353,8 +353,6 @@ public class AlbumDetailActivity extends Activity {
 
     /** 一行乐曲：曲名 + 作曲家 | 页码 | ♡。 */
     private View sheetRow(final SheetCatalog.Sheet sheet) {
-        final String enc = SheetFetcher.localEnc(this, sheet.uuid);
-
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -409,7 +407,7 @@ public class AlbumDetailActivity extends Activity {
         });
         r.addView(heart, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 38)));
 
-        r.setOnClickListener(v -> openSheet(sheet, sub));
+        r.setOnClickListener(v -> openSheet(sheet));
         LinearLayout wrap = new LinearLayout(this);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.addView(r, new LinearLayout.LayoutParams(
@@ -424,18 +422,13 @@ public class AlbumDetailActivity extends Activity {
     /**
      * 打开一首乐曲：曲谱只能来自外部拷贝，本地没有就 toast 提示，不联网。
      */
-    private void openSheet(final SheetCatalog.Sheet sheet, final TextView sub) {
-        SheetFetcher.open(this, sheet.uuid, new SheetFetcher.Callback() {
-            @Override
-            public void onReady(String encPath) {
-                startPlayer(encPath, sheet.displayName());
-            }
-
-            @Override
-            public void onError(String msg) {
-                Ui.toast(AlbumDetailActivity.this, msg);
-            }
-        });
+    private void openSheet(final SheetCatalog.Sheet sheet) {
+        String enc = SheetFetcher.localEnc(this, sheet.uuid);
+        if (enc == null) {
+            Ui.toast(this, "乐曲不存在");
+            return;
+        }
+        startPlayer(enc, sheet.displayName());
     }
 
     private void startPlayer(String enc, String title) {

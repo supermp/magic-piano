@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * 原版「曲集」目录（分类 → 标签 → 曲集/专辑 → 乐曲）。
  *
- * 数据来源：原版 App 登录后调用的接口（2026-10 抓包）
+ * 数据来源：原版 App 登录后调用的接口（抓包整理）
  *   GET /library/categories
  *   GET /albums_v3/tags/<分类uuid>?instrument=piano&area=<地区uuid>
  *   GET /albums_v3/albums/<标签uuid>?instrument=piano&area=<地区uuid>
@@ -57,8 +57,8 @@ public final class SheetCatalog {
          * 展示用的曲名。
          *
          * 拜厄、车尔尼、哈农这类练习曲集，出版社上传时常常只填编号（"1"、"2"…），
-         * 全库 18369 首里有 333 首是这样（集中在 8 本），列表里只剩一个光秃秃的
-         * 数字，很难读。这里补成「第 N 条」；其余曲名原样返回。
+         * 这类曲目在列表里只剩一个光秃秃的数字，很难读。这里补成「第 N 条」；
+         * 其余曲名原样返回。
          */
         public String displayName() {
             if (name != null && NUMERIC.matcher(name).matches()) {
@@ -75,7 +75,7 @@ public final class SheetCatalog {
     public static final class Album {
         public final String uuid;
         public final String name;
-        /** 封面文件 uuid，对应 assets/covers/<uuid>.jpg */
+        /** 封面文件 uuid，对应应用目录 files/covers/&lt;uuid&gt;.jpg */
         public final String cover;
         public final String publisher;
         public final List<Sheet> sheets = new ArrayList<>();
@@ -110,17 +110,14 @@ public final class SheetCatalog {
             this.uuid = uuid;
             this.name = name;
         }
-
-        
-
-        
     }
 
     private static volatile List<Category> sCats;
+    /** 首次解析的串行锁：并发首次调用只解析一次，不各建一套索引。 */
+    private static final Object LOCK = new Object();
     /**
-     * uuid 索引：catalog.json 解析完建一次，之后 uuid 查名/查曲集都是 O(1)。
-     * 之前 sheetByUuid/albumOfSheet 是四层循环全树线性扫 —— 17361 首一查就是
-     * 几万次字符串比较，"最近打开"一页 19 行每行还要查两遍（名字+所属曲集）。
+     * uuid 索引：catalog.json 解析完建一次，之后 uuid 查名/查曲集都是 O(1)，
+     * 避免四层循环全树线性扫（"最近打开"一页 19 行每行要查两遍：名字 + 所属曲集）。
      * 多标签曲集会重复出现，用 putIfAbsent 取第一次（曲谱包本来就是 1 曲集:1 曲子）。
      */
     private static volatile Map<String, Sheet> sSheetIdx;
@@ -131,13 +128,21 @@ public final class SheetCatalog {
     private SheetCatalog() {
     }
 
-    /** 懒加载并缓存；只在 UI 线程调用（解析 1.65MB JSON 约几十毫秒）。 */
+    /**
+     * 懒加载并缓存；可在任意线程调用。首次调用解析整份 JSON，之后只读 volatile 缓存。
+     * 首次解析在 LOCK 内串行，避免多个线程各解析一遍、各写一套索引；
+     * 先建好索引再发布 sCats，读到非空 sCats 时索引一定已就绪。
+     */
     public static List<Category> all(Context c) {
         List<Category> r = sCats;
-        if (r == null) {
-            r = parse(c);
-            sCats = r;
-            buildIndexes(r);
+        if (r != null) return r;
+        synchronized (LOCK) {
+            r = sCats;
+            if (r == null) {
+                r = parse(c);
+                buildIndexes(r);
+                sCats = r;
+            }
         }
         return r;
     }
@@ -149,11 +154,15 @@ public final class SheetCatalog {
      * 不重建的话刚导入的目录这一辈子都不会生效，要杀进程才行。
      */
     public static void reload(Context c) {
-        sCats = null;
-        sSheetIdx = null;
-        sAlbumIdx = null;
-        sSheetAlbumIdx = null;
-        all(c);
+        // 清空与重建必须在同一把锁内：否则另一线程正好在 all() 里解析旧目录，
+        // 它的 sCats 会覆盖这里的结果，刚导入的新目录就看不到。
+        synchronized (LOCK) {
+            sCats = null;
+            sSheetIdx = null;
+            sAlbumIdx = null;
+            sSheetAlbumIdx = null;
+            all(c);
+        }
     }
 
     /**
@@ -237,7 +246,7 @@ public final class SheetCatalog {
     }
 
     /**
-     * 外部资源目录里的目录文件是否存在。
+     * 资源目录里的 catalog.json 是否存在（外部专属目录和内部目录都查）。
      * HomeActivity 用它判断"资源包导没导入"，没导入就引导用户去选包。
      */
     public static boolean hasExternalCatalog(Context c) {

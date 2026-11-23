@@ -11,8 +11,8 @@ import java.util.List;
  *
  * 曲谱由外部拷贝进来，放在应用专属外部目录：
  *     sdcard/Android/data/com.magicpig.piano/files/sheets/&lt;乐曲uuid&gt;/sheet.xml.enc
- * 拷贝方式见 tools/unpack_backup.py（从 library/sheets/ 备份解包后 adb push，
- * 或直接 USB 传文件过去）。没有的乐曲点开就提示"乐曲不存在"，App 不会去下载。
+ * 日常由 tools/deploy.py / sync_devices.py 铺设，手工恢复用 unpack_backup.py。
+ * 没有的乐曲点开就提示"乐曲不存在"，App 不会去下载。
  *
  * 【为什么不再内置下载】
  * 原版服务端取曲谱要带 60 天有效期的 JWT，过期就全量失效；而真正的离线版
@@ -30,13 +30,6 @@ import java.util.List;
 public final class SheetFetcher {
 
     private SheetFetcher() {
-    }
-
-    public interface Callback {
-        void onReady(String encPath);
-
-        /** 失败原因（人话）。 */
-        void onError(String msg);
     }
 
     /**
@@ -57,19 +50,5 @@ public final class SheetFetcher {
             if (f.isFile()) return f.getAbsolutePath();
         }
         return null;
-    }
-
-    /**
-     * 打开一首曲谱：只查本地，查不到就报"没拷进来"。
-     *
-     * 同步执行（就是一次 stat），调用方**不用再开后台线程**。
-     */
-    public static void open(Context c, String uuid, Callback cb) {
-        String local = localEnc(c, uuid);
-        if (local != null) {
-            cb.onReady(local);
-        } else {
-            cb.onError("乐曲不存在");
-        }
     }
 }

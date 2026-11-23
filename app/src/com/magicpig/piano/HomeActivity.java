@@ -63,7 +63,6 @@ public class HomeActivity extends Activity {
     private static final int NAV_CATALOG = 2;
     /** 收藏页的两个页签（**曲集在前**，与搜索结果页一致） */
     private static final int FAV_ALBUMS = 0;
-    private static final int FAV_SONGS = 1;
 
     /** 资产是否已解包、可以渲染。onResume 早于解包回来时不能渲染 */
     private volatile boolean mReady;
@@ -654,19 +653,14 @@ public class HomeActivity extends Activity {
 
     /** 打开收藏的乐曲：曲谱只能来自外部拷贝，本地没有就 toast 提示，不联网。 */
     private void openFavSheet(final String uuid, final String title) {
-        SheetFetcher.open(this, uuid, new SheetFetcher.Callback() {
-            @Override
-            public void onReady(String encPath) {
-                startActivity(new Intent(HomeActivity.this, PlayerActivity.class)
-                        .putExtra(PlayerActivity.EXTRA_ENC, encPath)
-                        .putExtra(PlayerActivity.EXTRA_TITLE, title));
-            }
-
-            @Override
-            public void onError(String msg) {
-                Ui.toast(HomeActivity.this, msg);
-            }
-        });
+        String enc = SheetFetcher.localEnc(this, uuid);
+        if (enc == null) {
+            Ui.toast(this, "乐曲不存在");
+            return;
+        }
+        startActivity(new Intent(this, PlayerActivity.class)
+                .putExtra(PlayerActivity.EXTRA_ENC, enc)
+                .putExtra(PlayerActivity.EXTRA_TITLE, title));
     }
 
     /** 收藏的曲集：卡片网格，点卡片进乐曲列表。 */
@@ -1723,10 +1717,6 @@ public class HomeActivity extends Activity {
         return md.format(new java.util.Date(t));
     }
 
-    private void open(String enc) {
-        open(enc, null);
-    }
-
     private void open(String enc, String title) {
         // 调试通路排查：主页收到的 extra 与实际透传的值都记一行
         Log.i(TAG, "open(): 收到 selffeed=" + getIntent().getBooleanExtra("selffeed", false)
@@ -1746,7 +1736,6 @@ public class HomeActivity extends Activity {
         if (getIntent().getBooleanExtra("autotrial", false)) {
             it.putExtra("autotrial", true);
         }
-        // 调试：延迟多久才点「演奏」／开始后多久自动停（验证切换不刷新用）
         // 调试：演奏时保留单音光标（对比"整小节高亮"和"单音胶囊"）
         if (getIntent().hasExtra("nc")) it.putExtra("nc", getIntent().getBooleanExtra("nc", false));
         // 调试：忽略上次光标位置，等价于"清掉进度缓存"
@@ -1758,6 +1747,7 @@ public class HomeActivity extends Activity {
             it.putExtra("secso", getIntent().getIntExtra("secso", 0));
             it.putExtra("seceo", getIntent().getIntExtra("seceo", 0));
         }
+        // 调试：延迟多久才点「演奏」／开始后多久自动停（验证切换不刷新用）
         it.putExtra("trialdelay", getIntent().getIntExtra("trialdelay", 2500));
         it.putExtra("autostop", getIntent().getIntExtra("autostop", 0));
         if (getIntent().getBooleanExtra("feedfrom0", false)) {

@@ -42,8 +42,7 @@ import java.util.Set;
  * 通用约定：
  *  - **一律以 uuid 为键**，不存文件路径（换包名/换存储目录就失效过）；
  *  - **不存曲名**，名字一律从内置目录（SheetCatalog）现取；
- *  - played 给列表排序，dur + measures 是"空跑算时长"的缓存（一首约 3 秒，
- *    缓存后二次打开只要 72ms）。
+ *  - played 给列表排序；dur/measures 是旧版本留下的时长缓存，只读、不再产生新值。
  */
 public final class LibraryStore {
 

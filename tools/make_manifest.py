@@ -5,10 +5,10 @@
 与本机这份做精确差异，就能算出「这台该补哪些、该替换哪些」，不再依赖
 cache/catalog/catalog_diff.json 的历史基线假设。
 
-结构（短键是为了把 1.8 万条的 JSON 控制在 2~3MB）：
+结构（短键是为了把整份清单控制在几 MB）：
   {
     "v": 1, "generated_at": "...",
-    "catalog_sha256": "...", "catalog_bytes": 2283076, "sheet_count": 18052,
+    "catalog_sha256": "...", "catalog_bytes": <字节数>, "sheet_count": <曲目数>,
     "sheets": {
       "<uuid>": {"m": "<服务端 mtime>", "s": <enc 字节数>,
                  "h": "<enc sha256>", "z": "<zip size>:<zip mtime>"}
@@ -16,7 +16,7 @@ cache/catalog/catalog_diff.json 的历史基线假设。
   }
 
 增量生成：已存在清单且该 uuid 的 `z`（本地 zip 的 size+mtime）与 `m` 都没变，
-就直接沿用旧的 `h`/`s` —— 不重复读 4.4GB 谱包。只有新增、或本地 zip 被
+就直接沿用旧的 `h`/`s` —— 不重复读全部谱包。只有新增、或本地 zip 被
 重新下载过（mtime 变化）的曲目才重新算 sha256。
 
 用法：

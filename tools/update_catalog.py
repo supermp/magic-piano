@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """全量更新「曲库目录」，并报告最近有哪些乐曲/曲集更新过。
 
-数据源（2026-10 抓包逆向）：
+数据源（客户端接口，抓包整理）：
     GET  library/categories?instrument=piano&area=<area>
     GET  albums_v3/tags/<分类uuid>
     GET  albums_v3/albums/<标签uuid>?page&page_size=100
@@ -11,9 +11,9 @@ App 内没有令牌；过期后需在本机配置中更新。
 
 用法：
     python tools/update_catalog.py              # 抓全量 + 对比 + 报告（不覆盖目录）
-    python tools/update_catalog.py --write      # 顺手覆盖 library/catalog.json（会重抓一遍）
+    python tools/update_catalog.py --write      # 抓全量并直接用本次结果覆盖 library/catalog.json
     # 已跑过默认模式的话，直接用 to_v2(cache/catalog/catalog_full.json) 覆盖目录即可，
-    # 省掉第二次 5 分钟抓取；曲库数据不在 APK 内，不需要重打 APK。
+    # 不必再抓一遍；曲库数据不在 APK 内，不需要重打 APK。
 
 产物：
     cache/catalog/catalog_full.json      全量原始抓取（含 mtime/ctime/下载量等，供追溯）
@@ -46,12 +46,20 @@ def token():
                      '（模板见 local.env.example）')
 
 
-TOKEN = token()
+TOKEN = None
+
+
+def auth_token():
+    """第一次真正联网时才读令牌：`from tools.update_catalog import to_v2` 的离线用法不触发。"""
+    global TOKEN
+    if TOKEN is None:
+        TOKEN = token()
+    return TOKEN
 
 
 def get(path, extra=ARGS, retry=3):
     url = '%s/%s?%s' % (API, path, extra)
-    req = urllib.request.Request(url, headers={'x-access-token': TOKEN,
+    req = urllib.request.Request(url, headers={'x-access-token': auth_token(),
                                                'Accept': 'application/json'})
     for attempt in range(retry + 1):
         try:

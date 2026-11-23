@@ -37,7 +37,6 @@ BACKUP = os.path.join(BASE, 'library', 'sheets')
 CATALOG = os.path.join(BASE, 'library', 'catalog.json')
 COVERS = os.path.join(BASE, 'library', 'covers')
 PKG = 'com.magicpig.piano'
-ONLY_ENC_DEFAULT = False
 
 # 本地解压暂存目录（deploy.py 会覆盖它，让「只铺 enc」和「铺全部文件」各用一份）
 STAGE_DIR = os.path.join(BASE, 'cache', 'seed', 'ext')
@@ -83,7 +82,7 @@ def fast_push(args, uuids, adb):
     # 解压暂存目录（deploy.py 在"全量模式"下会换一个，避免和"只铺 enc"的暂存混在一起）
     stage = STAGE_DIR
     os.makedirs(stage, exist_ok=True)
-    names = ['sheet.xml.enc'] if (args.only_enc or ONLY_ENC_DEFAULT) else None
+    names = ['sheet.xml.enc'] if args.only_enc else None
 
     todo, missing = [], []
     for u in uuids:
@@ -216,7 +215,7 @@ def main():
         os.makedirs(out, exist_ok=True)
         try:
             z = zipfile.ZipFile(zp)
-            names = ['sheet.xml.enc'] if (args.only_enc or ONLY_ENC_DEFAULT) \
+            names = ['sheet.xml.enc'] if args.only_enc \
                 else [n for n in z.namelist() if not n.endswith('/')]
             for n in names:
                 z.extract(n, out)

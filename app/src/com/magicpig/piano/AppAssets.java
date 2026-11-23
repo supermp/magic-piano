@@ -32,9 +32,6 @@ public final class AppAssets {
      * （判定参数）、模型或音源，都必须 +1，否则设备上永远是旧副本 ——
      * 调 UFP 参数时就踩过：改完配置、装上 APK，`eva.json` 里的
      * `params` 还是旧值，跑出来的评分一个字符都没变。
-     *
-     * （3 和 6 是调参实验反复改配置留下的，功能上无区别、不必回收；7 是把资产分发
-     *   改成 `AssetManager.list()` 递归后强制重解压了一次，用来确认这条路可用。）
      */
     private static final int VERSION = 7;
 

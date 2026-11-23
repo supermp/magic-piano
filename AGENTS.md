@@ -34,7 +34,7 @@
 - 服务端令牌（只在 `local.env`，App 侧已彻底没有）；
 - 具体曲谱/曲集 uuid —— 需要样本时用"运行时发现"（如 `MainActivity.firstSheetEnc()`），
   写死会在曲库更新后被下架而失效；
-- 探针 Activity 的无限暴露：必须带 `android:permission`（`exported=false` 会连 adb 一起挡掉，见 §4）。
+- 探针 Activity 不能裸 `exported=true`，必须带 `android:permission`（见 §4）。
 
 ## 2. 目录
 
@@ -97,8 +97,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - `build.sh` 结尾自动把产物复制成 `dist/magicpiano-<versionName>.apk`（如 `magicpiano-20261123.apk`），
   并删除 `dist/magicpiano-*.apk` 里的其它文件 —— **交付目录始终只有一个 APK**，不会拿旧包冒充。
   曲库包（`magicpiano-library-*.zip`）和资产包不受影响。
-- 文件名用 versionName，**同一天多次构建会重名并覆盖**（接受这个取舍）。
-  要判断先后只能读 APK 里的 versionCode（`aapt2 dump badging`），文件名不含它。
+- 文件名用 versionName，同一天多次构建会重名覆盖；先后只能看 versionCode（见「版本号」）。
 - 开发资产包 `dist/magicpiano-runtime-assets.zip`（文件名固定）解压到仓库根目录，再生成图片、构建。
 - 交付物统一放 `dist/`；`deploy.py` / `sync_devices.py` 默认取最新的 `magicpiano-*.apk`（可用 `--apk` 指定）。
 - 改 Java 后必须全量重编。`build.sh` 会清理旧 class，避免隐式编译留下失效类。
@@ -127,8 +126,8 @@ python tools/deploy.py --apk-only --serial <serial>
 | `HomeActivity` | 曲库首页、分类、搜索、最近、收藏；默认「最近打开」 |
 | `AlbumDetailActivity` | 曲集详情与乐曲列表 |
 | `PlayerActivity` | 谱面、试听、UFP 演奏、选段、进度、结果卡与状态协调 |
-| `ImportActivity` | SAF 资源包导入、断点续传与失败记账 |
-| `MainActivity` | native 音频链探针，不参与主流程；`exported=true` + `android:permission="android.permission.DUMP"`（adb 可启动、第三方 App 不可） |
+| `ImportActivity` | SAF 资源包导入、按已有文件跳过与失败记账 |
+| `MainActivity` | native 音频链探针（调试用），不参与主流程；暴露方式见下 |
 | `AlgoEngine` | 引擎初始化、谱包解密打开、PCM 合成试听、播放头与小节表 |
 | `UfpTrial` / `TrialListener` | UFP 会话、麦克风/自喂、精确区间、结算与取消 |
 | `SfeInterface` | JNI 声明；包名和方法名必须匹配现有 so 导出符号 |
@@ -136,7 +135,7 @@ python tools/deploy.py --apk-only --serial <serial>
 | `SheetCatalog` / `SheetFetcher` | 目录解析与纯本地谱包定位 |
 | `LibraryStore` | `recent.json`、`fav_sheets.json`、`fav_albums.json` 的原子读写 |
 | `AppAssets` | 按版本把 APK 引擎资产解压到内部存储 |
-| `SheetTrim` | 谱面位置/裁剪查询；含反编译恢复代码 |
+| `SheetTrim` | 谱面裁剪（仅 `MainActivity` 调试页使用）；含反编译恢复代码 |
 | `TempoMark` | 从首小节提取速度标记供顶栏显示，不改 native 读取的谱包 |
 | `EvalRating` | 解析音准、节奏、速度、总分 |
 | `Ui` / `FlowLayout` / `NineSliceDrawable` | 视觉规范、布局与九宫格 |
@@ -162,7 +161,7 @@ python tools/deploy.py --apk-only --serial <serial>
 
 - 会话代数 `sGen` 必须贯通建会话、喂音、停止与放弃；`alive(myGen)` 同时检查运行态和代数。
 - native handler 归属单独由 `sHandlerGen` 记录，不能用 stop 自己产生的新代数代替 handler 代数。
-- `mListener/mRec/mFeedThread` 等静态引用在锁内快照、校验归属后清理；旧线程不得碰新会话资源。
+- `sListener/mRec/mFeedThread` 等静态引用在锁内快照、校验归属后清理；旧线程不得碰新会话资源。
 - 建会话取消或失败在同一引擎任务的 `finally` 内释放本代 handler并恢复预览，调用线程不再直接补做 native 清理。
 - `onStop/onDestroy` 使用带 owner 的 `abandon()`；建会话在途时也不能只靠 `isRunning()` 判断。
 
@@ -191,7 +190,7 @@ python tools/deploy.py --apk-only --serial <serial>
 
 - Java→JS 明文 JSON 在桥接前保护 `%`，避免原桥 `decodeURIComponent` 抛 `URIError`；UTF-8 使用 `TextDecoder`。
 - 光标统一使用 `#sheet-cursor-preview` 金色胶囊；只有一套位置状态和一条阅读存档。
-- 渲染器恒为 preview 模式；演奏态由 Java `mPerformMode` 控制整小节高亮和命中反馈，不切 magic、不重绘。
+- 渲染器恒为 preview 模式；演奏态由 Java `mPerformMode` 控制整小节高亮（命中标记另走结果接口），不切 magic、不重绘。
 - 点谱面定位不主动滚屏；进度条、恢复和回起点允许滚动。重画光标不得无条件抢回视口。
 - 渲染调度使用 setTimeout 补丁，避免长曲 MessageChannel 排队饿死交互 JS。
 - 恢复/跳转到未渲染位置时显示载入卡；以目标小节真正上屏为完成判据，并提供取消与完整状态回滚。
@@ -219,7 +218,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - 色板：底 `#FFFCE8`、主棕 `#774B04`、深棕 `#4D2D00`、金 `#F0C03C→#D89A30`、羊皮纸 `#EBC6A5`。
 - 布局 `Ui.scale()` 与字号 `Ui.fontScale()` 分离；字号下限 0.68，浮层使用独立 float 尺寸体系。
 - 不可用状态统一 `Ui.setDisabled()`，不要另造置灰颜色或重复点击守卫。
-- 谱面 zoom 按曲谱区 CSS 高分档：大屏约 0.65、小屏约 0.465；不要为凑整数行反复改系数。
+- 谱面 zoom 按曲谱区 CSS 高度分档：大屏约 0.65、小屏约 0.465；不要为凑整数行反复改系数。
 - 顶栏速度标记使用系统音符字形，`applyTempoChip()` 只设置文字，不自绘或强行放大。
 - 手型切换使用 `setElectricPianoLeft/RightHandVolume` 和 CSS 灰化；每个新谱页显式重置合手。
 - 播放中用手型修订号补发最新音量，不能只用一个易丢失更新的 dirty 布尔量。
@@ -259,11 +258,15 @@ python tools/deploy.py --apk-only --serial <serial>
    with open('cache/catalog/catalog_full.json', encoding='utf-8') as f:
        catalog = to_v2(json.load(f))
    with open('library/catalog.json', 'w', encoding='utf-8') as f:
-       json.dump(catalog, f, ensure_ascii=False, indent=1)
+       json.dump(catalog, f, ensure_ascii=False, separators=(',', ':'))
    PY
    ```
 
-   `update_catalog.py --write` 也能覆盖目录，但会重新全量抓取，通常不用。
+   写入格式固定为紧凑单行（`separators=(',', ':')`），与 `update_catalog.py --write` 一致；
+   换用别的缩进会让整份目录产生无意义的全文件 diff。
+
+   `update_catalog.py --write` 会用**同一次抓取**的结果直接覆盖目录（不会再抓一遍），
+   但等于跳过人工复核 diff，通常不用。
 
 3. 对 `sheets_mtime_changed` 的 uuid 删除对应本地旧 zip，再增量下载。下载器只按文件存在跳过，不删除就不会换新版；**不要手删设备 enc**：
 
@@ -302,7 +305,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - App 按 versionCode 决定升级：设备低才安装，相等跳过，设备高拒绝降级。
 - 下架 orphan 只报告，不擅自删除设备或本地数据；确需清理时另行确认。
 - 验收 enc 数与清单一致、设备清单哈希与本机一致；连续第二次应补 0/替换 0。
-- 手工调用 `unpack_backup.py` 时 uuid 清单必须 LF；铺设备暂存会复用旧 enc，同步前清理。
+- 铺设备暂存 `cache/seed/` 会复用旧 enc：`sync_devices.py` 每次同步前自己清，手工跑 `unpack_backup.py` 前也要清。
 - 下载 URL 现换现下，不缓存。修改目录解析时注意 `composers_zh/mtime/ctime` 在乐曲对象顶层，`page_in_book` 在 `data` 内。
 - SAF 导入只有全部成功才删源包；单文件失败删除半截文件并保留源包。
 
@@ -310,12 +313,12 @@ python tools/deploy.py --apk-only --serial <serial>
 
 按改动范围验证；纯文档或目录整理不必运行设备测试。
 
-1. 运行 `python tools/clean_check.py`，按报告处理到 0 项。
+1. 运行 `python tools/clean_check.py`，按报告处理到 0 项；`app/build` 里的 APK 中间产物确认不再装机后再删。
 2. 删除本轮临时脚本、截图、设备端 dump/screencap 和铺设备暂存；不要碰用户目录。
 3. Java 改动全量构建；拼接 JS/渲染器改动做语法与真实页面验证。
 4. 涉及试听、演奏或 native 生命周期时，验证起播/推进/停止、建会话、取消或结束、native 释放与预览恢复，并检查 listener、Handler、WebView、AudioRecord/AudioTrack 的对称清理。
 5. 交付前确认 `dist/` 里的 APK 晚于 `app/src` 与 `app/assets` 的最新改动。
-6. 同步本文，但不写临时曲库数量、设备序列号、本机路径或调试日志。
+6. 本文只写当前状态与约束，不写临时曲库数量、设备序列号、本机路径或调试日志。
 
-仓库已 `git init`（含 `.gitignore` / `.gitattributes`），但**还没有首个提交**；不要擅自提交或推送。
+仓库已 `git init`（含 `.gitignore` / `.gitattributes`）；不要擅自提交或推送。
 公开前用 `git status` / `git check-ignore` 再核对候选文件。

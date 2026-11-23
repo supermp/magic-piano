@@ -215,7 +215,7 @@ public final class AlgoEngine {
      * 音量 100 = 默认满音量（实测与不设置时输出逐字节一致）。
      *
      * 【为什么不重建模块】静音只是改音量，不改变合成时序，因此总采样数、
-     * 小节表、播放进度全部不变 —— 不需要停播、不需要重跑空跑、更不需要
+     * 小节表、播放进度全部不变 —— 不需要停播、不需要重算时长、更不需要
      * 重建预览模块（重建会把正在播放的 PCM 源头抽走，必然断音）。
      *
      * 【线程安全】native 预览模块是全局单例，不能和 Player 线程的 playNext
@@ -594,7 +594,6 @@ public final class AlgoEngine {
         return Math.max(minBuf, TRACK_BUF_BYTES);
     }
 
-    /**
     /**
      * 从第 measure 小节、第 voice 声部、第 offset 个位置起播；
      * measure=0、voice=0、offset=0 表示从头。
@@ -1043,7 +1042,7 @@ public final class AlgoEngine {
         /**
          * 写一块 PCM。非阻塞 + 短睡重试，而不是阻塞式 write()：阻塞写在缓冲满时
          * 一挂就是整整一缓冲（约 1.1 秒），定位/停止请求半天叫不停播放循环。
-         * 绝不能"写不下就顺手合成下一块"，那会在硬件还没消费时空跑完整首曲子。
+         * 绝不能"写不下就顺手合成下一块"，那会在硬件还没消费时就把整首曲子合成完。
          */
         private int write(AudioTrack track, SfeInterface.PlayNote n) {
             if (n.pcm == null || n.pcmLength <= 0) return 0;

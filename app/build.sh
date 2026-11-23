@@ -30,7 +30,7 @@ echo "=== [0/6] 清理 ==="
 # 每一步（javac / d8 / aapt2 / zipalign / apksigner）都是整文件覆盖，留着旧的
 # 无害。唯一副作用：删掉某个 .java 后，它上次编译出的 .class 还会被 dex 进去
 # —— 遇到这种情况手动删一下 build/classes 即可。
-mkdir -p build/classes build/dex build/gen build/out build/dexout
+mkdir -p build/classes build/dex build/out build/dexout
 # 【坑】javac 是**隐式编译**：只传源码文件时，若某个 .class 比它的 .java 还"新"
 # （mtime 只到秒，同一分钟内改完再编译就会判成"没变"），javac 会直接跳过它。
 # 表现是：源码改了、脚本也打印"完成"、APK 也装上了，但行为完全没变 ——
@@ -109,7 +109,7 @@ echo "    versionCode=$VC  versionName=$VN  （由源码树内容派生）"
     -I "$AJ" --manifest AndroidManifest.xml \
     --min-sdk-version 26 --target-sdk-version 34 \
     --version-code "$VC" --version-name "$VN" \
-    "${RES_ARGS[@]}" --java build/gen 2>&1 | tail -10
+    "${RES_ARGS[@]}" 2>&1 | tail -10
 ls -la build/base.apk
 
 echo "=== [4/6] 打包 dex + native libs + assets ==="

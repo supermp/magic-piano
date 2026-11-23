@@ -72,14 +72,6 @@ def pick_serial(adb, cli_serial=None):
         import time
         time.sleep(2)
         devs = online_devs(adb)
-    out = ''
-    for line in out.splitlines()[1:]:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split('\t')
-        if len(parts) >= 2 and parts[1] == 'device':
-            devs.append(parts[0])
     if cli_serial:
         if cli_serial not in devs:
             print('!! 指定的 --serial %s 不在在线列表里（在线：%s）' % (cli_serial, devs))

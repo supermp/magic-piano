@@ -160,7 +160,8 @@ def version_name(code):
     """`YYYYMMDD`：只取日期部分，同一天多次构建显示值相同。
 
     这是刻意的：versionName 只用于展示，Android 的升级判据只有 versionCode。
-    同一天的先后通过 versionCode（以及 dist/magicpiano-<versionCode>.apk 文件名）区分。
+    同一天的先后只能看 versionCode（dist 文件名用的是 versionName，同一天会重名）；
+    versionCode 本身写在 APK 里，aapt2 dump badging 可见。
     """
     s = str(code)                                  # YYMMDDNNN
     return '20%s%s%s' % (s[0:2], s[2:4], s[4:6])

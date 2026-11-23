@@ -120,8 +120,6 @@ public class PlayerActivity extends Activity {
     private long mBackConfirmAt;
     /** 演奏中最近一次光标位置（-1 = 还没有）：视口跟随定时任务靠它拉回视口 */
     private int mLastCurM = -1, mLastCurO, mLastCurV;
-    /** 本次演奏画过多少帧光标：0 = 一个音都没判到（按停时可以跳过评分） */
-    private int mTrialCursorFrames;
     /**
      * 本次演奏光标**离开过起点**吗。用它判"有没有真的演奏推进进度"：
      * 引擎一开跑会一路报起点的空闲假位置，那种不算；只有 onCursor 报出一个与
@@ -209,10 +207,10 @@ public class PlayerActivity extends Activity {
     private volatile boolean mPreviewActive;
     /** 这首曲子两只手是否都有音符（决定手型按钮能不能点） */
     private volatile boolean mHandCanSplit = true;
-    /** 演奏起点（0-based）。谱面被裁过时，引擎报的小节号要加回这个偏移 */
+    /** 运行时申请录音权限的请求码（onRequestPermissionsResult 里按它分流） */
     private static final int REQ_MIC = 41;
 
-    /** 谱面整页是否已画完（空跑要等它，避免和渲染抢 CPU） */
+    /** 谱面整页是否已画完（跳转/恢复要等它，避免和渲染抢 CPU） */
     private boolean mRendered = false;
     /**
      * 「曲首光标待放」：已决定要放，但还在等画面稳定（绘制/重排彻底停下）。
@@ -223,8 +221,6 @@ public class PlayerActivity extends Activity {
      * 由 {@link SheetView#beginSettleWatch()} 在 JS 侧盯着。
      */
     private boolean mPlaceAtStartPending;
-    /** 是否正处在"等画面稳定"状态（曲首光标已画上并锁可见，等稳定后纠正位置）。 */
-    private boolean mSettling;
     /** 正在由程序把光标放到曲首（不算用户定位，见 placeCursorAt）。 */
     private boolean mPlacingStart;
     /** 曲首光标的可见性锁是否已加上（用户一自己定位就解掉）。 */
@@ -285,7 +281,6 @@ public class PlayerActivity extends Activity {
     private static final int[] HAND_CYCLE = {0, 1, 2};
 
     private String mEncPath;
-    private String mSheetTitle;
     private volatile boolean mLoaded;
     /** 手指正按在进度条上：这段时间不让 ticker 把进度条和状态文字抢回去 */
     private volatile boolean mScrubbing;
@@ -298,7 +293,7 @@ public class PlayerActivity extends Activity {
      *
      * 时序坑：`restoreSavedState()` 由 `onSheetRendered`（JS 渲染
      * 完成）触发，而 `mResumeCursor` 是在 bootstrap 的后台线程里读完、再 `runOnUiThread`
-     * 赋值 —— 小曲子渲染只要 1~2 秒，native 空跑却要好几秒，于是渲染先完成、存档还没读出来，
+     * 赋值 —— 小曲子渲染只要 1~2 秒，而 bootstrap 还要在后台读目录、数小节，于是渲染先完成、存档还没读出来，
      * 那时 `mResumeCursor == null` 被当成"本来就没存档"，`mCursorRestored = true` 永久放弃；
      * 等 bootstrap 赋完值也没人再调，用户就再也看不到"是否载入上次状态"的询问。
      * 现在存档没读完就**先不判断**，由 bootstrap 赋值后补调一次。
@@ -699,16 +694,13 @@ public class PlayerActivity extends Activity {
                 openEntryButtons();
                 // 整页画完再恢复"阅读现场"（选段 + 光标）：提前滚会露白。
                 // ⚠ 演奏中绝不能恢复：seekToNote 会画一枚**预览胶囊**，而演奏态
-                // 已经有一根呼吸光柱，两者并存就是用户看到的"两道光"。
+                // 已经有一枚演奏光标（金胶囊），两者并存就是用户看到的"两道光"。
                 // 试听/演奏中由 restoreSavedState() 内部跳过，但**不能因此放弃**：
                 // 试听按停后还会再触发一次恢复（见 togglePlay / onError）。
                 restoreSavedState();
                 // 这个回调**不代表**整页真的画完（真机实测它常常紧跟首屏 3ms 才来，
                 // 八次进谱只来一次，大谱面 4.6s 报完成而 DOM 还在变），
                 // 所以不在这里动曲首光标 —— 交给 beginSettleWatch 的稳定检测。
-                // 谱面整页画完再补算时长：大谱面（车尔尼 Op.740 的 XML 有 120 万字符）
-                // 光渲染就要 2 秒多，空跑又要十几秒，两者并发互相抢 CPU，
-                // 首屏会被拖得很难看。等渲染完再跑，用户先看到谱面。
             }
 
             @Override
@@ -1509,7 +1501,6 @@ public class PlayerActivity extends Activity {
         }
     }
 
-    /** 选段模式下点谱面：第一次设起点，第二次设终点（点更早的音会改起点，和原版一致）。 */
     /**
      * 把光标、播放头、进度条滑块和球上数字一次性摆到同一位置。
      *
@@ -1522,7 +1513,6 @@ public class PlayerActivity extends Activity {
         // （程序自己放曲首时 mPlacingStart=true，不走这条）
         if (!mPlacingStart && mCursorLocked) {
             mCursorLocked = false;
-            mSettling = false;
             mPlaceAtStartPending = false;
             mUi.removeCallbacks(mForcePlaceRun);
             if (mSheet != null) {
@@ -1539,6 +1529,7 @@ public class PlayerActivity extends Activity {
         setMeasureStatus(measure);
     }
 
+    /** 选段模式下点谱面：第一次设起点，第二次设终点（点更早的音会改起点，和原版一致）。 */
     private void handleSectionTap(int m, int o, int v) {
         if (mSecStartM < 0) {
             mSecStartM = m; mSecStartO = o; mSecStartV = v;
@@ -1782,13 +1773,6 @@ public class PlayerActivity extends Activity {
     // ---------------- 演奏（跟弹）：现场收音驱动光标 ----------------
 
     /**
-     * 「演奏」按钮：与「试听」互斥的二态开关。
-     * 开始 = 停掉并等死试听 Player（它独占 native 预览模块）→ 建 UFP 会话
-     * → 麦克风 44100Hz 喂入；期间引擎对照曲谱实时匹配，光标按真实弹奏推进
-     * （非计时器）。演奏运行中「试听」置灰 —— 现场演奏不该被误触截断，
-     * 要切回试听先按停止结束演奏。
-     */
-    /**
      * 本次演奏算不算"没演奏"：
      * ① 一个音都没收到 —— 沿用按停时的输入峰值口径 {@code peak < 300}；
      * ② 收到了声音，但光标从头到尾没离开过起点（一直落在第一个音上，比如一直在
@@ -1801,6 +1785,13 @@ public class PlayerActivity extends Activity {
         return UfpTrial.peakLevel() < 300 || !mTrialProgressed;
     }
 
+    /**
+     * 「演奏」按钮：与「试听」互斥的二态开关。
+     * 开始 = 停掉并等死试听 Player（它独占 native 预览模块）→ 建 UFP 会话
+     * → 麦克风 44100Hz 喂入；期间引擎对照曲谱实时匹配，光标按真实弹奏推进
+     * （非计时器）。演奏运行中「试听」置灰 —— 现场演奏不该被误触截断，
+     * 要切回试听先按停止结束演奏。
+     */
     private void toggleTrial() {
         if (mTrialRunning) {
             if (!mUfpRunning) {
@@ -1818,8 +1809,7 @@ public class PlayerActivity extends Activity {
                 mTrialNoPlay = noPlay;
                 final long played = SystemClock.elapsedRealtime() - mTrialStartedAtMs;
                 final int peak = UfpTrial.peakLevel();
-                Log.i(TAG, "按停：已跑 " + played + "ms，光标帧 " + mTrialCursorFrames
-                        + "，输入峰值 " + peak + "，推进过=" + mTrialProgressed
+                Log.i(TAG, "按停：已跑 " + played + "ms，输入峰值 " + peak + "，推进过=" + mTrialProgressed
                         + "，没演奏=" + noPlay);
                 if (!noPlay) {
                     // 收尾要算评分，得好几秒（native ufpFinish）。这段时间必须让用户
@@ -1878,7 +1868,6 @@ public class PlayerActivity extends Activity {
         final boolean hadPreview = mPreviewActive || AlgoEngine.get().isPlaying();
         // 即使 Player 尚未创建，也要让后面的 stopAndWait 作废旧 seekEpoch。
         if (mPreviewActive) setPlaybackUi(false);
-        mTrialCursorFrames = 0;
         mTrialProgressed = false;   // 新一轮：还没离开过起点
         mTrialNoPlay = false;       // 上一轮的静默退出标志不带到这一轮
         // 进谱时为了让曲首光标不被重绘擦掉，给 body 加过 `wb-cursor-lock`
@@ -1953,7 +1942,7 @@ public class PlayerActivity extends Activity {
             // 上一次演奏留下的红叉**不清**：用户要它继续留在谱面上，
             // 提醒下一遍注意这些音。渲染器 followPitch2 会按 id 替换同一位置的标记，
             // 不会叠成两层；只在换曲（新 SheetView）时才自然清空。
-            // 3. 合成(自喂)+建 UFP 会话在引擎线程跑：空跑/播放/演奏三者
+            // 3. 合成(自喂)+建 UFP 会话在引擎线程跑：试听/演奏与预览模块的关系
             //    与预览模块的关系全靠这条线程串行化
             AlgoEngine.get().post(() -> {
                 try {
@@ -1961,7 +1950,6 @@ public class PlayerActivity extends Activity {
                 // 拖进度条定位，再点演奏，就只练这一小段（练琴最常见的用法）。
                 // 以前在这里重取 headMeasure()，跨越建会话的几秒会和 UI 上摆好的
                 // 起点不一致 —— 现在整次演奏统一用同一个起点。
-                final String xml = AlgoEngine.get().getSheetXml();
 
                 // 自喂音频的合成在 UfpTrial 内部做（必须在 releasePreviewModule 之前），
                 // 这里原来还算了一份 blocks，纯属 magicPiano 时代的残留 —— 等于把整曲
@@ -1998,7 +1986,7 @@ public class PlayerActivity extends Activity {
                     endPos = new int[]{lastM, 0, 0};   // 到曲末：越界一格交给 applyRange 探测
                 }
                 Log.i(TAG, "实验终点 -> " + endPos[0] + "/" + endPos[1] + "/" + endPos[2]);
-                boolean ok = UfpTrial.start(PlayerActivity.this, mEncPath, xml, mHandType,
+                boolean ok = UfpTrial.start(mEncPath, mHandType,
                         new int[]{bm, bv, bo}, endPos,
                         self, quiet, mTrialListener);
                 if (ok) {
@@ -2133,7 +2121,6 @@ public class PlayerActivity extends Activity {
         updateTransportState();
     }
 
-    /** 演奏期间把试听/选段/手型入口置灰（试听期间对称地置灰演奏/选段，见 setPlaybackUi） */
     /**
      * 演奏看的视口跟随：每隔 400ms 判一次"光标还在视口里吗"。
      *
@@ -2209,6 +2196,7 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    /** 演奏期间把试听/选段/手型入口置灰（试听期间对称地置灰演奏/选段，见 setPlaybackUi） */
     private void setTrialUi(boolean on) {
         mScreenOnTrial = on;
         applyKeepScreenOn();
@@ -2294,15 +2282,6 @@ public class PlayerActivity extends Activity {
         updateTransportState();
     }
 
-    /**
-     * UI 是否已经不可用（Activity 正在销毁，或谱面 WebView 已销毁）。
-     *
-     * 引擎/喂音频线程的回调比 Activity 活得久：用户按返回、或 System 回收页面之后，
-     * TrialController 仍会回调 onCursor/onFinished。这些回调都在 runOnUiThread 里，
-     * 里面直接摸 mSheet 就是 NPE（实测崩溃栈：
-     *   NullPointerException ... SheetView.setMagicMode(boolean) on null reference
-     *   at PlayerActivity$3.lambda$onFinished）。所有 UI 回调入口先过这一关。
-     */
     /**
      * 离开页面就结束演奏。
      *
@@ -3029,7 +3008,6 @@ public class PlayerActivity extends Activity {
         endRestoring();       // 撤卡片 / 解锁 / 停掉恢复轮询
         // 2) 停掉"判稳后原地重画"：里面记的是恢复目标，晚到会再把光标拽回去
         mUi.removeCallbacks(mForcePlaceRun);
-        mSettling = false;
         mPlaceAtStartPending = false;
         if (mSheet != null) mSheet.endSettleWatch();
         discardReadingState();
@@ -3123,7 +3101,6 @@ public class PlayerActivity extends Activity {
         mSheet.lockPreviewCursor();
         mCursorLocked = true;
         mPlaceAtStartPending = true;
-        mSettling = true;
         mSheet.beginSettleWatch();
         mUi.removeCallbacks(mForcePlaceRun);
         mUi.postDelayed(mForcePlaceRun, 22000);
@@ -3131,18 +3108,15 @@ public class PlayerActivity extends Activity {
 
     /** JS 判定画面已稳定（或 20 秒封顶）→ 原地重画一次光标，随后放开页面。 */
     private void onSheetSettled() {
-        mSettling = false;
         flushPlaceAtStart();
         // 恢复流程里，只有"跳转已确认"之后的判稳才撤卡片；
         // 判稳 20s 封顶先到、目标还没上屏时，卡片必须继续留着（等轮询重试滚动）。
         if (mRestoreTarget == null || mJumpConfirmed) endRestoring();
     }
 
-    /** 兜底：稳定回调彻底没来，也不能漏掉"纠正重排位移"这一步、更不能把页面锁死。 */
     /** mForcePlaceRun 的实际逻辑（单独提出来：Runnable 自引用自己会编译不过）。 */
     private void forcePlaceNow() {
         Log.w(TAG, "画面稳定回调超时，强制重画光标");
-        mSettling = false;
         if (mSheet != null) mSheet.endSettleWatch();
         flushPlaceAtStart();
         // 恢复流程里目标还没上屏：不能撤卡片（撤了用户就会点在空白/旧位置上），
@@ -3155,6 +3129,7 @@ public class PlayerActivity extends Activity {
         endRestoring();
     }
 
+    /** 兜底：稳定回调彻底没来，也不能漏掉"纠正重排位移"这一步、更不能把页面锁死。 */
     private final Runnable mForcePlaceRun = () -> forcePlaceNow();
 
     private void flushPlaceAtStart() {
@@ -3364,6 +3339,15 @@ public class PlayerActivity extends Activity {
         Log.i(TAG, "播放头同步到光标位置 " + m);
     }
 
+    /**
+     * UI 是否已经不可用（Activity 正在销毁，或谱面 WebView 已销毁）。
+     *
+     * 引擎/喂音线程的回调比 Activity 活得久：用户按返回、或 System 回收页面之后，
+     * UfpTrial 仍会回调 onCursor/onFinished。这些回调都在 runOnUiThread 里，
+     * 里面直接摸 mSheet 就是 NPE（实测崩溃栈：
+     *   NullPointerException ... SheetView.setMagicMode(boolean) on null reference
+     *   at PlayerActivity$3.lambda$onFinished）。所有 UI 回调入口先过这一关。
+     */
     private boolean uiGone() {
         return isFinishing() || isDestroyed() || mSheet == null;
     }
@@ -3466,7 +3450,6 @@ public class PlayerActivity extends Activity {
                 mLastCurM = measure;
                 mLastCurO = offset;
                 mLastCurV = voice;
-                mTrialCursorFrames++;
                 // 光标离开过起点 = 真在推进进度（这些帧已过 onCursor 的空闲假位置守卫）。
                 // 需求：全程一直落在第一个音上算"没演奏"，静默退出、不弹结果窗。
                 if (measure != mTrialStartMeasure || offset != mTrialStartOffset
@@ -3570,7 +3553,7 @@ public class PlayerActivity extends Activity {
                 // 演奏结束后状态行回到光标所在的小节（演奏期间一直在报它）
                 setMeasureStatus(mCurMeasure);
             });
-            // 完整评测 JSON 已在 TrialController 里落 logcat，这里不刷屏
+            // 完整评测 JSON 已落盘（见上面 cache/eva.json），这里不刷屏
         }
 
         /**
@@ -3896,8 +3879,8 @@ public class PlayerActivity extends Activity {
      * 两个调用场景：① 选段生效/演奏中拖到段外被拒；② 横向划动被载入卡片中途
      * 接管（手势的 UP/CANCEL 进不来，见 dispatchTouchEvent）。
      *
-     * ⚠ 必须按"播放头 + 小节起点"重算，不能拿 `mLastSamples`（最近一次 ticker
-     * 报的采样）：跳转之后播放头已经在新小节，而那个采样还是旧位置的 ——
+     * ⚠ 必须按"播放头 + 小节起点"重算，不能拿"最近一次 ticker 报的采样"：
+     * 跳转之后播放头已经在新小节，而那个采样还是旧位置的 ——
      * 两者组合会把滑块甩到最左边（第 200 小节的采样 ÷ 整曲 ≈ 1‰）。
      * 状态行一起刷：只回弹滑块会出现"小球在曲首、右边写着第 200 小节"。
      */
@@ -3931,13 +3914,8 @@ public class PlayerActivity extends Activity {
     /**
      * 进度条位置 -> 小节号。
      *
-     * 以前必须靠「空跑整曲合成」拿到总采样数才能换算，为了这首曲子首次打开
-     * 要在后台跑满一分钟（李斯特超技 4 实测 60 秒）。原版 dex 里根本没有
-     * playFirst/playNext 这套调用（只有 init/releasePreviewModule），
-     * 也就是原版压根不做这个 —— 那是我们自己为了进度条精确加的。
-     * 现在改成：**有缓存的总采样就按采样（精确）；没有就按小节数等分**
-     * （小节数是从 XML 直接数出来的，不需要任何合成）。
-     * 代价：没算过时长的曲子，进度条粒度是"小节"而不是"采样"，
+     * 有总采样数就按采样换算（精确）；没有就按小节数等分 —— 小节数从 XML 直接数，
+     * 不需要整曲合成。代价：没算过时长的曲子，进度条粒度是"小节"而不是"采样"，
      * 拖动定位仍然准确（定位本来就是按小节走的）。
      */
     private static int measureOfProgress(int progress) {
@@ -3977,7 +3955,7 @@ public class PlayerActivity extends Activity {
         // 页面已经走掉（引擎回调比 Activity 活得久）：别再摸控件和谱面
         if (uiGone()) return;
         // 演奏中：进度/状态行/谱面光标一律归 onCursor 管。
-        // 否则预览的 ticker（自喂合成、空跑算时长都会留下一个还在跑的 Player）
+        // 否则预览的 ticker（试听播放会留下一个还在跑的 Player）
         // 会跟演奏抢 UI —— 表现就是谱面光标在走、底部状态行却停在别的小节上。
         if (mTrialRunning) return;
         mCurMeasure = measure;
@@ -4154,7 +4132,6 @@ public class PlayerActivity extends Activity {
                     }
                 }
                 final String title = (given != null && !given.isEmpty()) ? given : "未命名";
-                mSheetTitle = title;
                 // 打开即记一次「最近打开」（本地时间戳），曲库页按它倒序排
                 if (sheetUuid != null) store.touch(sheetUuid);
 
@@ -4184,7 +4161,7 @@ public class PlayerActivity extends Activity {
                 // 否则上一首停在哪儿，这一首点「试听/演奏」就从哪儿开始。
                 if (resumeCursor == null) AlgoEngine.get().movePlayheadTo(0, 0, 0);
 
-                // 谱面立刻上屏，**不等空跑**：空跑只影响进度条和"时长"显示，
+                // 谱面立刻上屏，**不等时长估算**：时长只影响进度条显示，
                 // 不影响播放本身（播放会话自己会重建模块）。
                 runOnUiThread(() -> {
                     // 加载期间用户已经返回：谱面不用再画了（Activity 已 finish，
@@ -4193,7 +4170,7 @@ public class PlayerActivity extends Activity {
                     mResumeCursor = resumeCursor;
                     mResumeSection = resumeSection;
                     mResumeScanned = true;
-                    // 渲染可能已经完成（小曲子 1~2 秒就画完，而空跑还没结束）：
+                    // 渲染可能已经完成（小曲子 1~2 秒就画完，而存档还在后台读）：
                     // 那时 onSheetRendered 里的那次 restoreSavedState 被门控挡住了，
                     // 这里必须补调一次，否则询问浮层永远不会出现。
                     if (mRendered) {
@@ -4226,7 +4203,6 @@ public class PlayerActivity extends Activity {
                     // 遮罩不在这里撤 —— 谱面还没画出来，撤掉只会露出白屏。
                     // 真正撤掉是在 onSheetRendered（见那里）+ 下面的兜底定时器。
                     // 谱面一上屏，状态行就切到「第 1 小节 / 共 N 小节」。
-                    // 时长算没算完跟这一行无关（空跑只喂进度条），不再播报
                     setMeasureStatus(0);
                     // 每个新页面都从合手开始。AlgoEngine 是跨页面单例，必须显式同步；
                     // 否则上一首留下的单手音量会配着本页默认的「合手」按钮起播。
@@ -4561,7 +4537,6 @@ public class PlayerActivity extends Activity {
     }
 
     private float mSwipeX, mSwipeY, mSwipeStartProgress;
-    private long mSwipeAt;
     private boolean mSwipeOk, mSwipeScrub;
 
     private void trackSwipeSeek(android.view.MotionEvent ev) {
@@ -4570,7 +4545,6 @@ public class PlayerActivity extends Activity {
                 mSwipeX = ev.getX();
                 mSwipeY = ev.getY();
                 mSwipeStartProgress = mSeek == null ? 0 : mSeek.getProgress();
-                mSwipeAt = android.os.SystemClock.elapsedRealtime();
                 mSwipeScrub = false;
                 // 底部那条（进度条 + 四个钮）自己处理手势，别重复响应
                 mSwipeOk = mBottomBar == null || ev.getY() < mBottomBar.getTop() - dp(6);

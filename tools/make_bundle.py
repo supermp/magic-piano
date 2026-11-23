@@ -7,7 +7,7 @@
     sheets/<uuid>/sheet.xml.enc       乐谱（App 唯一用到的文件）
 
 用法：
-    python tools/make_bundle.py                    # 全量（约 4.4GB）
+    python tools/make_bundle.py                    # 全量（体积随曲库增长）
     python tools/make_bundle.py --top 500          # 只打前 500 首的乐谱（目录仍是全的）
     python tools/make_bundle.py --category 考级     # 只打该分类的乐谱
     python tools/make_bundle.py --album "..."      # 只打该曲集的乐谱
@@ -18,7 +18,7 @@
   * **ZIP_STORED 不压缩**：.enc 本身加密过、压缩比 1.01，压缩纯属白烧 CPU；
     jpg 也已是压缩格式。不压缩还能让 App 侧解压变成纯拷贝，快很多。
   * **zip64**：全量包 >4GB 必须开 zip64（Python 默认自动，Java ZipInputStream 支持）。
-  * 乐谱只取 sheet.xml.enc（App 唯一读的文件），不带 cover.png 等，省约 3.1GB。
+  * 乐谱只取 sheet.xml.enc（App 唯一读的文件），不带 cover.png 等附属文件。
 """
 import argparse
 import io

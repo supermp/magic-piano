@@ -138,10 +138,6 @@ public class SheetView extends WebView {
         default void onSectionKeys(JSONArray keys) {
         }
 
-        default void onSectionFailed(String reason) {
-        }
-
-
         /**
          * WebView 的渲染进程没了（系统回收 / GPU 崩）。
          *
@@ -211,7 +207,7 @@ public class SheetView extends WebView {
      *
      * 现在渲染器恒用 mode="preview"，原因：magic 那套视觉差异全部只在
      * **重绘**时落地（谱线 0.5px、#DFCAB4 浅棕线、字号 39、bottomPadding=0），
-     * 而我们从 就改成"切模式只补发 initPage、不重绘"，所以真正还在
+     * 而切模式只补发 initPage、不重绘，所以真正还在
      * 运行期生效的 magic 分支只剩两条：
      *   · scrollToMeasure("top") 的偏移 -(headerHeight+14)（magicModeTopScrollOffset）
      *     —— 同一句"把光标顶到视口上方"，演奏态比试听/恢复低 22px 就是它；
@@ -219,10 +215,11 @@ public class SheetView extends WebView {
      * 两条都是纯负担，没有一条是我们想要的，所以干脆不切。
      *
      * 原版 magic 的其它效果我们本来就没在用：呼吸光柱（光标已统一金胶囊）、
-     * 弹对变绿（改成全黑 + 红叉）、命中星光（Java 侧没接）、onPageClick（没注册）、
+     * 弹对变绿（改成全黑 + 红叉）、命中星光（未接）、onPageClick（没注册）、
      * levelRange 关卡裁剪（不传）。
      *
-     * 这个布尔只做两件事：演奏态给光标带整小节浅底、给 followPitchMagic/playHitFx 开门。
+     * 这个布尔现在只做一件事：演奏态给光标带整小节浅底（moveCursor2 的
+     * need_highlight_measure）。
      */
     private boolean mPerformMode = false;
     /**
@@ -533,45 +530,7 @@ public class SheetView extends WebView {
             Log.w(TAG, "符头色板补丁未命中（JS 结构变了？）");
         }
 
-        // ---- 补丁：把演奏态的谱面线条调回"试听那样" ----
-        // ⚠ 现在演奏态不再传 mode="magic"（见 mPerformMode），下面的配色 /
-        //   bottomPadding 两处补丁已经不会被运行时命中，保留作为纯防御：万一哪天有人把
-        //   mode 改回 magic，至少不会掉回浅棕线 + 多余行距。
-        // initPage 的 mode 分支里，magic/magic_advance 会把
-        //    vexflow_default_color 强制改成 "#DFCAB4"（浅棕灰）：
-        //      case"magic": case"magic_advance":
-        //        vexflow_default_color="#DFCAB4", firstRowY=0, bottomPadding=0
-        //    那是原版为演奏页的暖羊皮纸背景做的"弱化线条"，让光标和已弹音更突出。
-        //    但我们的演奏态背景是奶油白（和试听一致），这层浅棕落在白底上就是
-        //    "整页发灰变淡"——实测墨迹均色从 (96,92,79) 掉到 (219,198,172)，
-        //    墨迹像素少了一半。这里改回纯黑，与试听态完全一致。
-        String vcKey = "q.GlobalState.shareInstance.vexflow_default_color=\"#DFCAB4\"";
-        if (app.contains(vcKey)) {
-            app = app.replace(vcKey,
-                    "q.GlobalState.shareInstance.vexflow_default_color=\"#000000\"");
-            Log.i(TAG, "演奏态线条配色补丁已应用");
-        } else {
-            Log.w(TAG, "演奏态线条配色补丁未命中（JS 结构变了？）");
-        }
-
-        // 3) 布局一致性。magic 分支除了改颜色，还把
-        //      V.MeasuresRows.firstRowY=0, V.MeasuresRows.bottomPadding=0
-        //    bottomPadding 归零会让渲染器认为可用高度更多 —— 结果就是演奏态每行
-        //    能塞下更多小节（用户看到的是"点演奏前一行 3 小节、点完变 4 小节"，
-        //    谱面整体缩小一档）。这里只保留 firstRowY（预览态本来就传 0），
-        //    把 bottomPadding 去掉，两种 mode 的布局参数就一致了。
-        String bpKey = "V.MeasuresRows.firstRowY=0,V.MeasuresRows.bottomPadding=0";
-        if (app.contains(bpKey)) {
-            // 只去掉 bottomPadding；firstRowY=0 保留 —— 实测把它也去掉
-            // （让 magic 用 preview 的 score_padding_top=8）对"演奏态光标比预览态低
-            // 22px"没有任何影响，滚动 top 对齐本来就会把首行偏移抵消掉。
-            app = app.replace(bpKey, "V.MeasuresRows.firstRowY=0");
-            Log.i(TAG, "布局一致性补丁已应用（去掉 magic 的 bottomPadding=0）");
-        } else {
-            Log.w(TAG, "布局一致性补丁未命中（JS 结构变了？）");
-        }
-
-        // 4) 谱线粗细。isMagicMode 下渲染器还把谱线/小节线的描边压到 0.5px，
+        // 谱线粗细。isMagicMode 下渲染器还把谱线/小节线的描边压到 0.5px，
         //    我们的谱表比原版小、屏密度又高，0.5px 会明显变虚。
         //    CSS 压回 1px 的规则加在下面那段注入样式表里
         //    （CSS 优先于 SVG presentation attribute）。
@@ -789,8 +748,6 @@ public class SheetView extends WebView {
      * 实际发 initPage 配置。
      *
      * 只有一个用途：首次装载 / 尺寸修正 —— 回调里接着发 drawSheet。
-     * 早先还有一条 {@code drawAfter=false} 的"只切状态不重绘"路径给演奏态切模式用，
-     * 演奏态不再切 magic 后已无调用者，一并删掉。
      */
     private void sendInitPageNow() {
         JSONObject p = new JSONObject();
@@ -836,8 +793,8 @@ public class SheetView extends WebView {
             // 要求"演奏态没必要跟着换，维持试听时的颜色"，所以两种 mode 同色。
             p.put("bg_color", "#FFFCE8");
             // feature.single_note_play：开光标旁那个单音播放图标。它不只是装饰 ——
-            // 原版 moveMagicCursor 的 animation_type="shake" 抖的就是这个元素；
-            // 我们的命中反馈改用 playHitFx 自绘（见 HIT_JS），这里仍按原版开着，
+            // 原版 moveMagicCursor 的 animation_type="shake" 抖的就是这个元素。
+            // 我们的命中反馈不靠它（错音画红叉），这里仍按原版开着，
             // 免得以后想用 shake 时发现图标根本没画出来。
             JSONObject feature = new JSONObject();
             feature.put("single_note_play", true);
@@ -924,50 +881,6 @@ public class SheetView extends WebView {
      * 因此 initPage 里固定传 hand_type="both"（让渲染器永远画黑色），
      * 灰化一律由这里的 CSS 负责，两套机制不会互相打架。
      */
-    /**
-     * 选段（原版「自由选段」的同一套渲染通路）：段内高亮、段外压暗、两端粉色括号。
-     *
-     * 原版 Dart 侧发的就是这条 `renderSelectedSubLevel`，载荷我们从它自己的桥日志里
-     * 抄的：**左右手各一段**（右手 voice 0、左手 voice 4），两段的 measure/offset 相同；
-     * `hand` 跟着手型走（both/right/left），渲染器会按它只点亮对应那只手。
-     *
-     * @param full true = 整曲（用来"取消选段"：full_score 会把所有音符都点亮 → 不再压暗）
-     */
-    public void applySection(int m0, int o0, int m1, int o1, String hand, boolean full) {
-        try {
-            JSONObject sublevel = new JSONObject();
-            sublevel.put("sequence", 1);
-            sublevel.put("hand", hand);
-            sublevel.put("individual_hand_when_both", "");
-            JSONArray segs = new JSONArray();
-            segs.put(segment("right", 0, m0, o0, m1, o1));
-            segs.put(segment("left", 4, m0, o0, m1, o1));
-            sublevel.put("segments", segs);
-
-            JSONObject p = new JSONObject();
-            p.put("sublevel", sublevel);
-            p.put("full_score", full);
-            p.put("cursor_position", pos(m0, 0, o0));
-            p.put("clear_result", true);
-            p.put("need_single_note_play_btn", false);
-            send("renderSelectedSubLevel", p, (ok, d) -> {
-                Log.i(TAG, "renderSelectedSubLevel -> " + ok + " " + d);
-                if (!ok && mListener != null) mListener.onSectionFailed(String.valueOf(d));
-            });
-        } catch (Exception e) {
-            Log.e(TAG, "applySection 参数失败", e);
-        }
-    }
-
-    private static JSONObject segment(String hand, int voice, int m0, int o0, int m1, int o1)
-            throws org.json.JSONException {
-        JSONArray start = new JSONArray();
-        start.put(new JSONObject().put("measure", m0).put("voice", voice).put("offset", o0));
-        JSONArray end = new JSONArray();
-        end.put(new JSONObject().put("measure", m1).put("voice", voice).put("offset", o1));
-        return new JSONObject().put("hand", hand).put("start", start).put("end", end);
-    }
-
     private static JSONObject pos(int measure, int voice, int offset) throws org.json.JSONException {
         return new JSONObject().put("measure", measure).put("voice", voice).put("offset", offset);
     }
@@ -1049,6 +962,9 @@ public class SheetView extends WebView {
     public void queryMeasureReady(int measure, int voice, int offset,
                                   java.util.function.Consumer<Boolean> cb) {
         try {
+            // 首帧 drawSheet 回执（current_zoom）之前 mSheetZoom 还是初值，
+            // 用我们自己下发的 mExpectedZoom 兜底，别按 1.0 算。
+            final double zoom = mSheetZoom > 0.05d ? mSheetZoom : mExpectedZoom;
             send("wbMeasureVisible", pos(measure, voice, offset), (ok, d) -> {
                 boolean ready = false;
                 if (d instanceof JSONObject) {
@@ -1056,12 +972,12 @@ public class SheetView extends WebView {
                     int y = o.optInt("y", -1), sy = o.optInt("sy", 0), h = o.optInt("h", 0);
                     // y 是未缩放坐标：乘 zoom 才是 CSS 像素（实测 T618：y=1820、zoom=0.64
                     // → 1164，视口 [1147,1736]，与截图一致）
-                    double yCss = y * mSheetZoom;
+                    double yCss = y * zoom;
                     ready = y >= 0 && yCss >= sy && yCss <= sy + h;
                     // 恢复卡在"一直没上屏"时只能靠这行定位：y<0 = 那行还没画出来；
                     // yCss 远比 sy+h 大 = zoom 与实际不符（判定永远为 false）。
                     Log.d(TAG, "ready? m=" + measure + " y=" + y + " sy=" + sy + " h=" + h
-                            + " zoom=" + String.format("%.3f", mSheetZoom)
+                            + " zoom=" + String.format("%.3f", zoom)
                             + " yCss=" + Math.round(yCss) + " -> " + ready);
                 }
                 boolean f = ready;
@@ -1209,18 +1125,6 @@ public class SheetView extends WebView {
     }
 
     /**
-     * 清掉演奏结果标记。
-     *
-     * 出分时由 {@link #markTrialResult} 内部先清一次（只保留本轮结果），
-     * 这个方法留给"手动清除标记"之类的入口；换曲时 SheetView 是新建的，
-     * 标记本来就会随页面消失。
-     */
-    public void clearTrialResult() {
-        mWrongMarks.clear();
-        send("clearResults", new JSONObject(), null);
-    }
-
-    /**
      * 光标接口（唯一一条）：平铺的 measure/offset/voice。
      * 原版还有一条 moveMagicCursor（cursors 数组结构），随 magicPiano 通路一起删了。
      */
@@ -1251,8 +1155,7 @@ public class SheetView extends WebView {
      */
     public void moveCursor2(int measure, int offset, int voice, boolean needCursor,
                             boolean highlightMeasure, boolean forceScroll) {
-        // 光标样式已经统一成胶囊（见 applyCursorStyle），这里不再需要"演奏第一帧
-        // 切 breathing"那一步 —— 那一步正是"先胶囊后光柱、几秒后突然变粗"的来源。
+        // 光标样式已经统一成胶囊（见 applyCursorStyle），这里只挪位置、不切样式。
         // 同一时刻只放一帧出去，其余丢弃（见 mCursorInFlightAt 的注释）
         long now = android.os.SystemClock.elapsedRealtime();
         if (mCursorInFlightAt != 0 && now - mCursorInFlightAt < 500) {
@@ -1619,16 +1522,6 @@ public class SheetView extends WebView {
     }
 
     /**
-     * 把光标切成原版的「金色胶囊」样式。
-     *
-     * 渲染器内置三套光标（见 sheet_show.js 的 changeCursorStyle）：
-     *   normal        一根细线，不调这个接口时的默认值 —— 就是之前那根丑线
-     *   preview-cursor 一枚圆角胶囊，<rect rx=10 fill="#FCE996"/>，
-     *                  原版预览页用的就是它（色值与原版截图取样一致）
-     *   breathing     魔法模式下的呼吸光标
-     * 必须在谱面画完之后再切，切换时只是把三个光标元素的 visibility 换一下。
-     */
-    /**
      * 把**所有**预览胶囊藏起来（含重复节点）。
      *
      * 同一 id 可能被建出两份（drawSheet 清空 SVG 后缓存引用重建，旧节点没走），
@@ -1662,13 +1555,10 @@ public class SheetView extends WebView {
     /**
      * 确保光标是**唯一那套样式**：金色胶囊（`preview-cursor`）。
      *
-     * 用户决定统一：原来有三套（normal 细线 / preview-cursor 胶囊 /
-     * breathing 光柱），演奏切 breathing、其余切胶囊，于是每切一次就要
-     * 收另一套的残留 —— "两道光""演奏双光标""几秒后突然变粗"全是从这儿长出来的。
-     * 现在**只保留胶囊**，`changeCursorStyle` 仍然要发（渲染器默认是 normal 细线，
+     * 只保留胶囊：`changeCursorStyle` 仍然要发（渲染器默认是 normal 细线，
      * 不发就是那根丑线），但永远只发 preview-cursor，不再有"切来切去"。
      *
-     * 发完仍然跑一次 `HIDE_TRAIL_CURSORS_JS`：它会把历史上残留的光柱组藏掉，
+     * 发完仍然跑一次 `HIDE_TRAIL_CURSORS_JS`：藏掉渲染器留下的其它光标组，
      * 并藏掉重绘后重建的重复胶囊节点；紧接着按最后位置补画一次，保证用户
      * 自己定位的那枚光标不会因为这次清理而消失。
      */
@@ -1711,8 +1601,8 @@ public class SheetView extends WebView {
      * 非强制自动滚动窗口。
      *
      * 为什么不再传 mode="magic"：那套视觉差异只有在**重绘**时才落地（线宽 0.5、
-     * #DFCAB4 浅棕线、字号 39、bottomPadding=0），而我们自 现在切模式就
-     * 不重绘了，留在运行期的只剩 scrollToMeasure("top") 的 -(headerHeight+14) 偏移
+     * #DFCAB4 浅棕线、字号 39、bottomPadding=0），而现在切模式只补发 initPage、
+     * 不重绘，留在运行期的只剩 scrollToMeasure("top") 的 -(headerHeight+14) 偏移
      * —— 正是"演奏态光标比试听/恢复低 22px"的直接来源。详见 {@link #mPerformMode}。
      *
      * 冻结窗口这一段仍然要留：退出演奏后 initPage 回执补画光标、
@@ -1738,155 +1628,6 @@ public class SheetView extends WebView {
         }
     }
 
-    /**
-     * 命中反馈：音符闪光（每次引擎判定一个音时执行）。
-     *
-     * 原来这里还有一段"光柱脉动"（`wbBreathe`）—— 只有呼吸光柱存在时才成立，
-     * 光标统一成金胶囊后已删：
-     *   · 胶囊是 `<g transform="translate(...)">`，给它挂 CSS `transform` 动画会
-     *     覆盖掉 SVG 的 translate 属性，光标会瞬间跳到画布原点 —— 危险的写法；
-     *   · 原版那套 `breathingCursorAnimation{wave}` 走 anime.js，在我们这份打包里
-     *     本来就不工作（探针实测 opacity/transform 一直不写，`window.anime` 为 undefined）。
-     *
-     * 保留的是音符闪光：原版这一下是 Flutter 用 lottie（magic_sheet_star_glow.json）
-     * 叠在音符头上播的 —— H5 只负责通过 followPitchMagic 回传符头坐标，闪光本身在
-     * Flutter 层，没有可移植代码。这里用等效自绘：以当前光标中心为原点，铺一团
-     * 金色径向光晕 + 四道星芒，0.42s 扩散淡出。
-     * 位置取 `#sheet-cursor-preview` 的 bounding rect（光标就压在刚弹的那颗音上）。
-     */
-    private static final String HIT_JS =
-            "(function(){var b=document.querySelector('#sheet-cursor-preview');"
-                    + "if(!b)return;"
-                    + "var r=b.getBoundingClientRect(),cx=r.x+r.width/2,"
-                    + "cy=r.y+r.height/2;"
-                    + "var wrap=document.createElement('div');"
-                    + "wrap.style.cssText='position:fixed;left:'+(cx-20)+'px;top:'+(cy-20)+'px;"
-                    + "width:40px;height:40px;pointer-events:none;z-index:99999;"
-                    + "transform:scale(.3);opacity:1;"
-                    + "transition:transform .30s cubic-bezier(.25,.8,.35,1),opacity .30s linear;';"
-                    // 光核：原版星光 lottie 的渐变核色 #FFFB92 -> #FFDE82
-                    + "var halo=document.createElement('div');"
-                    + "halo.style.cssText='position:absolute;inset:6px;border-radius:50%;"
-                    + "background:radial-gradient(circle,rgba(255,251,146,.95) 0%,"
-                    + "rgba(255,222,130,.55) 45%,rgba(255,153,0,0) 75%);';"
-                    + "wrap.appendChild(halo);"
-                    // 四道星芒：#FF9900 向外淡出，长 34px（对应 lottie 的 34x42）
-                    + "for(var i=0;i<4;i++){var sp=document.createElement('div');"
-                    + "sp.style.cssText='position:absolute;left:50%;top:50%;width:34px;height:1.6px;"
-                    + "margin:-0.8px 0 0 -17px;border-radius:1px;"
-                    + "background:linear-gradient(90deg,rgba(255,153,0,0) 0%,"
-                    + "rgba(255,251,146,.95) 50%,rgba(255,153,0,0) 100%);"
-                    + "transform:rotate('+(i*45)+'deg);';wrap.appendChild(sp);}"
-                    + "document.body.appendChild(wrap);"
-                    + "requestAnimationFrame(function(){wrap.style.transform='scale(1)';"
-                    + "wrap.style.opacity='0';});"
-                    + "setTimeout(function(){if(wrap.parentNode)wrap.parentNode.removeChild(wrap);},340);"
-                    + "})()";
-
-    /**
-     * 逐音判定喂给渲染器（原版演奏主接口 followPitchMagic）。
-     *
-     * 引擎回的 JSON 字段和渲染器期望的不一样，这里做适配：
-     *   引擎（magicPiano/doSightReading 的 jsonStr）
-     *     {heads:[{key,note_position:{measure,offset,voice},state}],
-     *      expected_pitches:[{name,status}], extra_pitches:[...],
-     *      next_position:{measure,offset,voice}, evaluation_state}
-     *   渲染器（followPitchMagic 的 following_pitch_string）
-     *     {voices:[{position:{measure,voice,offset},
-     *                pitch:[{key,bias_type:"ok"|"extra"|"skipped"}],
-     *                grace:[]}],
-     *      next_position, next_grace_position:null}
-     *
-     * 渲染器拿到 voices 后自己完成"弹对变绿（magic_correct_color #67A700）、
-     * 多弹的音算 wrong、漏弹走 miss"，连符干符尾一起染 —— 这就是原版
-     * "弹中变色"的来源，我们不需要自己画。
-     */
-    public void followPitchMagic(String engineJson) {
-        if (!mPerformMode || engineJson == null || engineJson.isEmpty()) return;
-        String adapted;
-        try {
-            JSONObject src = new JSONObject(engineJson);
-            JSONObject out = new JSONObject();
-            JSONArray voices = new JSONArray();
-
-            JSONArray heads = src.optJSONArray("heads");
-            if (heads != null) {
-                for (int i = 0; i < heads.length(); i++) {
-                    JSONObject h = heads.optJSONObject(i);
-                    if (h == null) continue;
-                    // state == satisfied 才是这一音真的弹过了；其它状态不染色
-                    if (!"satisfied".equals(h.optString("state"))) continue;
-                    JSONObject pos = h.optJSONObject("note_position");
-                    if (pos == null) continue;
-                    JSONObject v = new JSONObject();
-                    v.put("position", pos);
-                    JSONArray pitch = new JSONArray();
-                    pitch.put(new JSONObject()
-                            .put("key", h.optString("key"))
-                            .put("bias_type", "ok"));
-                    v.put("pitch", pitch);
-                    v.put("grace", new JSONArray());
-                    voices.put(v);
-                }
-            }
-            // 多弹的音（extra_pitches 是键名数组）：挂到 next_position 上，
-            // 渲染器会把它算进 wrong_note_points（弹错的反馈点）
-            JSONArray extra = src.optJSONArray("extra_pitches");
-            if (extra != null && extra.length() > 0) {
-                JSONObject v = new JSONObject();
-                JSONObject pos = src.optJSONObject("next_position");
-                if (pos == null) {
-                    pos = new JSONObject().put("measure", 0)
-                            .put("voice", 0).put("offset", 0);
-                }
-                v.put("position", pos);
-                JSONArray pitch = new JSONArray();
-                for (int i = 0; i < extra.length(); i++) {
-                    String k = extra.optString(i);
-                    if (k != null && !k.isEmpty()) {
-                        pitch.put(new JSONObject().put("key", k)
-                                .put("bias_type", "extra"));
-                    }
-                }
-                v.put("pitch", pitch);
-                v.put("grace", new JSONArray());
-                voices.put(v);
-            }
-            out.put("voices", voices);
-            // 【故意不传 next_position】
-            // followPitchMagic 里有 next_position 会做三件事：scrollMeasureToTop(measure)
-            // 把当前小节顶到视口最上、moveCursor 定位、必要时 wave。
-            // 而魔法光柱的顶端在谱表上方 55px，小节一被顶到最上光柱就被切到视口外
-            // （实测 y=-22，肉眼就是"演奏时根本没有光标"）。
-            // 不传 next_position → 这一段整体跳过，只剩 addMagicFollowPitchs 的逐音染色
-            // （染色在前面的代码里，不依赖 next_position；isMagicFollowPitchPass 会因此
-            //  返回 false，只影响 wave 和回传坐标，而这两个我们都自己做了）。
-            // 光标定位交给引擎回调里的 moveCursor2，滚动改由 scrollToMeasure(center) 控制。
-            out.put("next_grace_position", JSONObject.NULL);
-            adapted = out.toString();
-        } catch (Throwable t) {
-            Log.w(TAG, "适配 following_pitch_string 失败：" + t);
-            return;
-        }
-        JSONObject d = new JSONObject();
-        try {
-            d.put("following_pitch_string", adapted);
-        } catch (Exception e) {
-            return;
-        }
-        send("followPitchMagic", d, (ok, data) ->
-                Log.d(TAG, "followPitchMagic -> ok=" + ok));
-    }
-
-    /**
-     * 演奏态每跟上一个音的命中反馈：音符闪光（见 {@link #HIT_JS}）。
-     * 光标已统一成金胶囊，不再有"光柱脉动"那一段。
-     */
-    public void playHitFx(int measure, int offset, int voice) {
-        if (!mPerformMode) return;
-        mUi.post(() -> safeEval(HIT_JS));
-    }
-
     /** 把某小节滚到视口指定位置（"center"/"top"） */
     public void scrollToMeasure(int measure, String align) {
         scrollToMeasure(measure, align, null);
@@ -1898,7 +1639,7 @@ public class SheetView extends WebView {
         try {
             sc.put("measure", measure);
             sc.put("align", align);
-            // 不要那条"当前小节"的浅色高亮，演奏态由光柱自己表达位置
+            // 不要那条"当前小节"的浅色高亮；演奏态的小节浅底由 moveCursor2 自己带
             sc.put("need_highlight_measure", false);
             sc.put("forceScroll", true);
         } catch (Exception e) {
@@ -2045,7 +1786,7 @@ public class SheetView extends WebView {
                 reply(action, id, true, "");
                 // 渲染完成后再补一次光标样式：drawSheet 的重绘会重置光标元素，
                 // 这次回调是"整页真的画完了"的时机，比 drawSheet 的 response 更晚、
-                // 更稳（魔法模式尤其需要它，光柱要等全部谱表都画出来才定位得准）
+                // 更稳（要等全部谱表都画出来，光标才定位得准）
                 applyCursorStyle();
                 if (mListener != null) mListener.onSheetRendered();
                 break;

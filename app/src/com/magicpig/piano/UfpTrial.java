@@ -1,6 +1,5 @@
 package com.magicpig.piano;
 
-import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,7 +59,6 @@ public final class UfpTrial {
     private static final int FEED_RATE = 44100;
 
     private static volatile boolean mRunning;
-    private static Context sApp;
     private static volatile Thread mFeedThread;
     private static volatile TrialListener sListener;
 
@@ -71,7 +69,7 @@ public final class UfpTrial {
      * 可能在这个窗口里点返回、甚至重进曲谱页再点一次演奏 —— 那时旧线程还在建，
      * 建完就会去写 mRunning / sListener / mFeedThread 这些**静态**状态，把新页面
      * 的会话踩掉；反过来新页面 start 撞上它还会直接收到"已经在演奏中"，界面复位
-     * 了但光标样式已经切到 magic（表现就是"试听/选段可点但光标是两道光"）。
+     * 了但演奏态标记还挂着（表现就是“试听/选段可点但预览里还画着演奏光标”）。
      * 有了代数，迟到的 start 建完先对一下号，对不上就静默放弃，一个静态字段都不碰。
      */
     private static final AtomicInteger sGen = new AtomicInteger();
@@ -133,7 +131,7 @@ public final class UfpTrial {
      * @param selfFeed true = 用本机合成的 PCM 当麦克风（调试/演示）；
      *                 false = 真麦克风
      */
-    public static boolean start(Context ctx, String encPath, String sheetXml,
+    public static boolean start(String encPath,
                                 int handType, int[] start, int[] end,
                                 boolean selfFeed, boolean feedSilence,
                                 TrialListener listener) {
@@ -158,17 +156,15 @@ public final class UfpTrial {
             // 标记活着但**不属于本页面**：上一个页面遗留的会话（它 onStop 的
             // abandon 没赶上这一轮建完），或者线程已死的历史残留。
             // 一律先丢弃再重建 —— 否则新页面会直接失败：界面复位了，但 startTrial
-            // 开头已经把谱面切成 magic、光柱也画了一根，于是「能点试听/选段 + 两道光」。
+            // 开头已经把演奏态打开（整小节高亮 + 演奏光标），于是「能点试听/选段 + 两道光标」。
             Log.w(TAG, "发现非本页面的残留会话，先丢弃再重建");
             abandon();
         }
         // 抢到本轮代数：之后任何 abandon / stop / 新 start 都会让它变，
         // 建会话结束时对不上号就说明这轮已经作废。
         final int myGen;
-        final Context app = ctx.getApplicationContext();
         synchronized (sLock) {
             myGen = sGen.incrementAndGet();
-            sApp = app;
             sListener = listener;
             mRunning = true;
         }
@@ -268,7 +264,6 @@ public final class UfpTrial {
                 if (myGen != sGen.get()) return false;
                 mRunning = false;
                 sListener = null;
-                sApp = null;
             }
             // native 收尾已在引擎任务的 finally 里完成；这里不能再直接调 native。
             // reason 只给一句人话；引擎返回码/异常原文放 detail，只进 logcat
@@ -278,7 +273,7 @@ public final class UfpTrial {
 
         Log.i(TAG, "UFP 建会话耗时 " + (SystemClock.elapsedRealtime() - tSession) + "ms");
         sPeakLevel = 0;   // 新一轮会话重新统计输入峰值（按停时判"有没有弹"）
-        Thread feed = new Thread(() -> feedLoop(app, selfFeed, feedSilence,
+        Thread feed = new Thread(() -> feedLoop(selfFeed, feedSilence,
                         pre, listener, myGen), "ufp-feed");
         synchronized (sLock) {
             if (myGen != sGen.get()) return false;
@@ -443,7 +438,6 @@ public final class UfpTrial {
             if (myGen == sGen.get() && sListener == listener) {
                 // 只有当前这一代才能清静态引用；旧会话的 ufpFinish 可能晚于新会话开始。
                 sListener = null;
-                sApp = null;
             }
         }
     }
@@ -483,7 +477,6 @@ public final class UfpTrial {
             // join(600) 这段时间里新 start 写好的 listener 会被旧 abandon 清掉，
             // 新会话按停时 stop() 读到 null 直接不做事。
             sListener = null;
-            sApp = null;
             // 只有真的跑过 UFP（handler 还活着）才需要收 native；建会话在途 /
             // 失败残留不碰全局单例，否则可能打断正在播的试听（预览模块是同一个）。
             hadNative = liveSession && handlerGen >= 0;
@@ -556,7 +549,7 @@ public final class UfpTrial {
 
     // ---------------- 喂音 ----------------
 
-    private static void feedLoop(Context ctx, boolean selfFeed, boolean feedSilence,
+    private static void feedLoop(boolean selfFeed, boolean feedSilence,
                                  java.util.List<short[]> pre,
                                  TrialListener listener, int myGen) {
         try {
@@ -564,7 +557,7 @@ public final class UfpTrial {
             if (selfFeed) {
                 selfFeed(pre, feedSilence, listener, myGen);
             } else {
-                micFeed(ctx, listener, myGen);
+                micFeed(listener, myGen);
             }
         } catch (Throwable t) {
             Log.e(TAG, "喂音异常", t);
@@ -642,7 +635,7 @@ public final class UfpTrial {
     }
 
     /** 真麦克风。 */
-    private static void micFeed(Context ctx, TrialListener listener, int myGen) {
+    private static void micFeed(TrialListener listener, int myGen) {
         if (!alive(myGen)) return;
         int min = AudioRecord.getMinBufferSize(FEED_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);

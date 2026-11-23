@@ -563,20 +563,6 @@ public final class Ui {
         v.setClickable(true);
     }
 
-    /**
-     * 所有弹出层按钮的**唯一**构造器：成绩卡四颗、载入卡「取消」、
-     * 恢复条「恢复 / 不用」都走这里。主次只差底色，圆角 / 金边 / 字号 /
-     * 内边距 / 最小高度 / 按下态一致 —— 不再各画一套。
-     *
-     * **尺寸分两档**，按"按钮有没有一个大正文可比"来定：
-     *  · {@link #SIZE_STANDARD}（默认）成绩卡 / 错误卡：卡片里有 40sp 的标题和
-     *    分数兜着，21sp / 56dp 的按钮是"次要元素"，比例正常；
-     *  · {@link #SIZE_COMPACT} 只有一行正文的浮层（恢复询问条、载入卡的「取消」）：
-     *    正文才 21sp，按钮若也 21sp + 56dp，看上去**比正文还大**，整条笨重得像
-     *    一张大按钮卡片。降到 18sp / 48dp。
-     *    手机（fontScale≈0.68）上受 floatSp 下限 0.85 保护，实际仍有 15.3sp，
-     *    比统一放大之前（14.3sp / 24dp）还是明显更大。
-     */
     /** {@link #floatButton(Activity, String, boolean, boolean)} 的尺寸档：标准（成绩卡） */
     public static final boolean SIZE_STANDARD = false;
     /** 尺寸档：紧凑（只有一行正文的浮层：恢复询问条、载入卡「取消」） */
@@ -586,7 +572,16 @@ public final class Ui {
         return floatButton(a, text, primary, SIZE_STANDARD);
     }
 
-    /** @param compact true = 紧凑档（一行正文的浮层用），见 {@link #floatButton(Activity, String, boolean)} 的说明 */
+    /**
+     * 所有弹出层按钮的**唯一**构造器：成绩卡四颗、载入卡「取消」、
+     * 恢复条「恢复 / 不用」都走这里。主次只差底色，圆角 / 金边 / 字号 /
+     * 内边距 / 最小高度 / 按下态一致 —— 不再各画一套。
+     *
+     * 尺寸分两档：标准档（成绩卡 / 错误卡，21sp / 56dp，卡片里有大标题和分数兜着）、
+     * 紧凑档（只有一行正文的浮层，18sp / 48dp —— 否则按钮比正文还大）。
+     *
+     * @param compact true = 紧凑档
+     */
     public static TextView floatButton(Activity a, String text, boolean primary, boolean compact) {
         TextView b = new TextView(a);
         b.setText(text);
