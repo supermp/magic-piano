@@ -1199,7 +1199,7 @@ public class HomeActivity extends Activity {
         ImageView thumb = new ImageView(this);
         Bitmap cb = null;
         if (alb != null && alb.cover != null && !alb.cover.isEmpty()) {
-            cb = Ui.coverBitmap(this, alb.cover, Ui.dp(this, 120));
+            cb = Ui.coverBitmap(this, alb.cover, Ui.dp(this, 56));
         }
         if (cb == null) cb = Ui.assetBitmap(this, DEFAULT_COVER);
         thumb.setImageBitmap(cb);

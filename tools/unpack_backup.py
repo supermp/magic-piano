@@ -267,34 +267,37 @@ def main():
         return
 
     tmp = tempfile.mkdtemp(prefix='sheet_seed_')
-    for i, u in enumerate(todo, 1):
-        zp = os.path.join(BACKUP, u + '.zip')
-        out = os.path.join(tmp, u)
-        os.makedirs(out, exist_ok=True)
-        try:
-            z = zipfile.ZipFile(zp)
-            names = ['sheet.xml.enc'] if args.only_enc \
-                else [n for n in z.namelist() if not n.endswith('/')]
+    try:
+        for i, u in enumerate(todo, 1):
+            zp = os.path.join(BACKUP, u + '.zip')
+            out = os.path.join(tmp, u)
+            os.makedirs(out, exist_ok=True)
+            try:
+                with zipfile.ZipFile(zp) as z:
+                    names = ['sheet.xml.enc'] if args.only_enc \
+                        else [n for n in z.namelist() if not n.endswith('/')]
+                    for n in names:
+                        z.extract(n, out)
+            except Exception as e:
+                print('  !! 解包失败 %s: %s' % (u, e))
+                continue
+            adb('shell', 'mkdir -p %s' % remote_dir(u))
             for n in names:
-                z.extract(n, out)
-            z.close()
-        except Exception as e:
-            print('  !! 解包失败 %s: %s' % (u, e))
-            continue
-        adb('shell', 'mkdir -p %s' % remote_dir(u))
-        for n in names:
-            r = adb('push', os.path.join(out, n), '%s/%s' % (remote_dir(u), n))
-            if r.returncode != 0:
-                print('  !! 推送失败 %s/%s: %s' % (u, n, (r.stderr or '').strip()[:120]))
-                break
-        else:
-            ok += 1
-        if i % 200 == 0 or i == len(todo):
-            print('  进度 %d/%d  已铺 %d' % (i, len(todo), ok), flush=True)
+                r = adb('push', os.path.join(out, n), '%s/%s' % (remote_dir(u), n))
+                if r.returncode != 0:
+                    print('  !! 推送失败 %s/%s: %s' % (u, n, (r.stderr or '').strip()[:120]))
+                    break
+            else:
+                ok += 1
+            if i % 200 == 0 or i == len(todo):
+                print('  进度 %d/%d  已铺 %d' % (i, len(todo), ok), flush=True)
 
-    print('\n完成：本次铺设 %d 首（跳过已有 %d，备份缺失 %d）' % (ok, skip, len(missing)))
-    if missing:
-        print('备份里没有的 uuid：%s…' % ', '.join(missing[:5]))
+        print('\n完成：本次铺设 %d 首（跳过已有 %d，备份缺失 %d）'
+              % (ok, skip, len(missing)))
+        if missing:
+            print('备份里没有的 uuid：%s…' % ', '.join(missing[:5]))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == '__main__':

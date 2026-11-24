@@ -984,10 +984,19 @@ public final class AlgoEngine {
      */
     public void postAsync(Runnable r) {
         if (Thread.currentThread() == mThread) {
-            r.run();
+            runAsyncTask(r);
             return;
         }
-        mBg.post(r);
+        mBg.post(() -> runAsyncTask(r));
+    }
+
+    /** 异步任务的异常只记账，不能让 HandlerThread 静默退出。 */
+    private void runAsyncTask(Runnable r) {
+        try {
+            r.run();
+        } catch (Throwable t) {
+            Log.e(TAG, "postAsync 任务异常", t);
+        }
     }
 
     public void post(Runnable r) {

@@ -3464,20 +3464,22 @@ public class PlayerActivity extends Activity {
         @Override
         public void onFinished(String evaJson, String metricsJson,
                                String pitchResultJson, int lastScore, boolean userStopped) {
-            // 把完整评测 JSON 落盘（cache/eva.json），排查打分口径时用 adb pull 取
-            try {
-                java.io.File f = new java.io.File(getCacheDir(), "eva.json");
-                StringBuilder sb = new StringBuilder();
-                sb.append("EVA:").append(evaJson == null ? "null" : evaJson).append((char) 10);
-                sb.append("METRICS:").append(metricsJson == null ? "null" : metricsJson).append((char) 10);
-                sb.append("VEXFLOW:").append(pitchResultJson == null ? "null" : pitchResultJson);
-                try (java.io.FileWriter w = new java.io.FileWriter(f)) {
-                    w.write(sb.toString());
+            // 完整评测 JSON 只在调试会话落盘（cache/eva.json），普通用户演奏不写。
+            if (mDebugSession) {
+                try {
+                    java.io.File f = new java.io.File(getCacheDir(), "eva.json");
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("EVA:").append(evaJson == null ? "null" : evaJson).append((char) 10);
+                    sb.append("METRICS:").append(metricsJson == null ? "null" : metricsJson).append((char) 10);
+                    sb.append("VEXFLOW:").append(pitchResultJson == null ? "null" : pitchResultJson);
+                    try (java.io.FileWriter w = new java.io.FileWriter(f)) {
+                        w.write(sb.toString());
+                    }
+                    Log.i(TAG, "评测 JSON 已存 " + f + " 长度="
+                            + (evaJson == null ? -1 : evaJson.length()));
+                } catch (Throwable t) {
+                    Log.w(TAG, "存评测 JSON 失败 " + t);
                 }
-                Log.i(TAG, "评测 JSON 已存 " + f + " 长度="
-                        + (evaJson == null ? -1 : evaJson.length()));
-            } catch (Throwable t) {
-                Log.w(TAG, "存评测 JSON 失败 " + t);
             }
 
             final String note = evalNote(evaJson);
