@@ -134,7 +134,7 @@ def fast_push(args, uuids, adb):
             meta['sheets'].pop(name, None)
     names = ['sheet.xml.enc'] if args.only_enc else None
 
-    todo, missing = [], []
+    todo, missing, failed = [], [], []
     for u in uuids:
         zp = os.path.join(BACKUP, u + '.zip')
         out_dir = os.path.join(stage, u)
@@ -157,17 +157,29 @@ def fast_push(args, uuids, adb):
                 for n in take:
                     with open(os.path.join(out_dir, os.path.basename(n)), 'wb') as w:
                         w.write(z.read(n))
+            if not os.path.isfile(out_enc) or os.path.getsize(out_enc) <= 0:
+                raise ValueError('包内没有有效的 sheet.xml.enc')
             meta['sheets'][u] = src_key
             todo.append(u)
         except Exception as e:
+            # 解包失败时目录里可能已经有半截 enc；整目录推送会把它带上设备。
+            # 先删掉失败目录，再记入 failed，最后统一拒绝推送。
+            shutil.rmtree(out_dir, ignore_errors=True)
             meta['sheets'].pop(u, None)
+            failed.append(u)
             print('  !! 解包失败 %s: %s' % (u, e))
 
     save_stage_meta(stage, meta)
     total = sum(os.path.getsize(os.path.join(stage, u, 'sheet.xml.enc'))
                 for u in todo if os.path.exists(os.path.join(stage, u, 'sheet.xml.enc')))
-    print('本地暂存 %d 首 / %.2f GB；备份缺失 %d 首'
-          % (len(todo), total / 1073741824.0, len(missing)))
+    print('本地暂存 %d 首 / %.2f GB；备份缺失 %d 首 / 解包失败 %d 首'
+          % (len(todo), total / 1073741824.0, len(missing), len(failed)))
+    if missing or failed:
+        if missing:
+            print('备份里没有的 uuid（服务端 404，需另找）：%s…' % ', '.join(missing[:5]))
+        if failed:
+            print('解包失败的 uuid：%s…' % ', '.join(failed[:5]))
+        raise SystemExit('暂存不完整，未推送；先补齐/修复后重跑')
     if args.dry_run:
         print('(--dry-run，不推送)')
         return
@@ -180,8 +192,6 @@ def fast_push(args, uuids, adb):
         raise SystemExit('推送失败')
     n = adb('shell', 'find /sdcard/Android/data/%s/files/sheets/ -name sheet.xml.enc | wc -l' % PKG)
     print('设备侧现有谱文件：%s' % (n.stdout or '').strip())
-    if missing:
-        print('备份里没有的 uuid（服务端 404，需另找）：%s…' % ', '.join(missing[:5]))
 
 
 def main():
