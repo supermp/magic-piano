@@ -199,6 +199,7 @@ python tools/deploy.py --apk-only --serial <serial>
 
 ### 进度与小节号
 
+- 进度条按小节端点等分：首小节 0‰、末小节 1000‰，单小节曲子固定 0；不依赖时长或采样数。
 - 进度映射使用物理小节索引；UI 显示使用印刷小节号，两者不能混用。
 - MusicXML 小节可能无编号、弱起编号 0 或使用非数字编号；逐 part 数 `<measure>` 并取最大值。
 - 非数字/隐式编号沿用前一个印刷号；进度条不能因此映射错位。
@@ -292,7 +293,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - 元数据 catalog/covers/manifest 每次同步都推；谱包只推 add/replace。
 - mtime 变化用于发现服务端重传；设备是否替换由 enc 哈希决定，不能只看 mtime 或字节数。
 - App 按 versionCode 决定升级：设备低才安装，相等跳过，设备高拒绝降级。
-- 下架 orphan 只报告，不擅自删除设备或本地数据；确需清理时另行确认。
+- 下架清理以 **catalog.json** 为准（manifest 只做增量差异）：设备有、catalog 没有的才删；catalog 仍列出的清单缺曲/本地缺包只报告，不删。设备删除成功后才删本地 zip；一次超过 50 个先不删。
 - 验收 enc 数与清单一致、设备清单哈希与本机一致；连续第二次应补 0/替换 0。
 - 铺设备暂存 `cache/seed/` 会复用旧 enc：`sync_devices.py` 每次同步前自己清，手工跑 `unpack_backup.py` 前也要清。
 - 下载 URL 现换现下，不缓存。修改目录解析时注意 `composers_zh/mtime/ctime` 在乐曲对象顶层，`page_in_book` 在 `data` 内。

@@ -7,28 +7,28 @@ App 的升级判据是 **versionCode** —— Android 的标准做法，PackageM
   · 设备 versionCode 从 `dumpsys package` 读
   · 设备低 → install；相等 → 跳过；设备高 → 拒绝（防降级）
 
-  版本码统一用 9 位日期码（261111001）。它比历史上的 9 位单调计数器
-  （215696510）大，属正常升级，**不需要迁移分支**；8 位的 YYMMDDNN（26111101）
-  反而比旧码小，实测连 `install -r -d` 都会被系统拒绝
-  （INSTALL_FAILED_VERSION_DOWNGRADE），所以序号取 3 位。
+  版本码统一用 9 位日期码（YYMMDDNNN），序号取 3 位：8 位的 YYMMDDNN 比 9 位码
+  小，实测连 `install -r -d` 都会被系统拒绝（INSTALL_FAILED_VERSION_DOWNGRADE）。
 
-历史上这里用过 `app_fingerprint.txt`（APK 的 sha256），已删除：构建不可复现
-（zip 条目时间戳、v1 签名文件每次都变），同一份源码重编 sha 也变，拿它判
-"要不要装"只会白重装 137MB；而它本来该干的活（校验字节完整）也没人用。
+  App 的升级判据只有 versionCode，不用 APK 指纹：构建不可复现（zip 条目时间戳等），
+  同一份源码重编 sha 也会变，拿它判"要不要装"只会白重装。
 
 曲包仍然靠设备侧清单，因为一万多首没法靠文件名判断内容版本：
   library_manifest.json  catalog 的 sha256 + 每首乐曲的 enc sha256（由 make_manifest.py 生成）
 
 同步流程：
   · 曲包：
-      - 设备有清单 → 精确算 add（本机有设备无）/ replace（hash 或 mtime 不同）/
-        orphan（设备有本机无，只报告不删）。
+      - 设备有清单 → 精确算 add（本机有、设备无、catalog 仍列出）/
+        replace（清单 hash 不同；mtime 变化时回读 enc hash 确认）/
+        下架（设备实际有、catalog 无：删除）/
+        清单缺曲（catalog 仍有、本机清单/本地缺包：只报告）。
       - 设备没有清单（首次纳管）→ 扫描设备现有 enc 的 uuid 集合，补 add；
-        对 cache/catalog/catalog_diff.json 里标记为「内容重传」的曲目做字节数校验，
-        大小不同才算 replace。随后把本机清单推上去完成纳管。
-    之后每次都是精确 hash 差异，不再依赖历史 diff 文件。
+        对 cache/catalog/catalog_diff.json 里标记为「内容重传」的曲目读回设备 enc
+        算 sha256 再判 replace（重传新旧大小可能完全相同，不能只比字节数）。
+        随后把本机清单推上去完成纳管。
+    平时每次只比较当前清单与设备，不读取 diff 文件。
 
-只推变化的谱包；catalog.json / covers / 清单 / 指纹这几份元数据每次都推
+只推变化的谱包；catalog.json / covers / 清单这几份元数据每次都推
 （合计约 12MB，比 4.4GB 谱包便宜得多，也顺带保证目录与封面一致）。
 
 用法：
@@ -123,8 +123,7 @@ class Device:
     def installed_version_code(self):
         """读设备上已安装包的 versionCode。没装 / 读不到返回 0。
 
-        用 dumpsys package：PackageManager 自己记着这个值，不需要我们往设备
-        写任何凭据文件（这正是删掉 app_fingerprint.txt 的原因）。
+        用 dumpsys package：PackageManager 记录版本，版本判断不依赖额外凭据文件。
         """
         out = self('shell', 'dumpsys package %s' % PKG)
         m = re.search(r'versionCode=(\d+)', out or '')
@@ -153,7 +152,7 @@ def online_devices(adb):
 
 
 def load_changed():
-    """上次抓取里被标记为「内容重传」的 uuid，仅首次纳管时用来校验旧谱。"""
+    """catalog_diff.json 里被标记为「内容重传」的 uuid，仅首次纳管时用来校验设备旧谱。"""
     if not os.path.isfile(DIFF):
         return []
     try:
@@ -161,6 +160,20 @@ def load_changed():
             return [x['uuid'] for x in json.load(f).get('sheets_mtime_changed', [])]
     except Exception:
         return []
+
+
+def catalog_uuids():
+    """当前 catalog 的全部 uuid；下架清理只认它，manifest 缺曲不能作为删除依据。"""
+    with io.open(CATALOG, 'r', encoding='utf-8') as f:
+        cat = json.load(f)
+    out = set()
+    for c in cat.get('categories') or []:
+        for t in c.get('tags') or []:
+            for a in t.get('albums') or []:
+                for s in a.get('sheets') or []:
+                    if s and s[0]:
+                        out.add(s[0])
+    return out
 
 
 def clear_stage():
@@ -185,13 +198,12 @@ def push_meta(d):
     r = run([d.adb, '-s', d.serial, 'push', COVERS + os.sep + '.',
              '%s/covers' % REMOTE])
     ok.append('covers=%s' % ('ok' if r.returncode == 0 else 'FAIL'))
-    # 判据改成 versionCode 之后，设备上这份 sha256 凭据已经没有意义；
-    # 顺手删掉，避免以后有人看到它还以为"版本是靠它记的"。
+    # 设备侧不需要 APK 指纹；清掉可能残留的旧文件。
     d('shell', 'rm -f %s/app_fingerprint.txt' % REMOTE)
     return ', '.join(ok)
 
 
-def sync_one(d, local, local_sha, local_vc, args, apk_path):
+def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
     serial = d.serial
     print('\n===== %s =====' % serial)
     print('型号 %s' % (d('shell', 'getprop ro.product.model') or '').strip())
@@ -235,30 +247,47 @@ def sync_one(d, local, local_sha, local_vc, args, apk_path):
     local_sheets = local['sheets']
     if dev and isinstance(dev.get('sheets'), dict):
         ds = dev['sheets']
-        add = sorted(set(local_sheets) - set(ds))
-        replace = sorted(u for u in (set(local_sheets) & set(ds))
-                         if ds[u].get('h') != local_sheets[u]['h']
-                         or ds[u].get('m') != local_sheets[u]['m'])
-        orphan = sorted(set(ds) - set(local_sheets))
+        allowed = set(local_sheets) & catalog_set
+        add = sorted(allowed - set(ds))
+        replace = []
+        for u in sorted(allowed & set(ds)):
+            want = local_sheets[u]['h']
+            dev_h = ds[u].get('h')
+            if dev_h != want:
+                replace.append(u)
+            elif ds[u].get('m') != local_sheets[u]['m'] and d.enc_sha(u) != want:
+                replace.append(u)
+        # ⚠ 下架残留必须按设备上实际的 enc 文件算，不能只比清单：
+        # 设备清单可能已不含它，只比清单会漏，enc 数也会一直多一个。
+        # 下架只认 catalog；manifest 缺曲/本地缺包只能报告，不能作为删除依据。
+        have = set(d.enc_uuids())
+        delisted = sorted(have - catalog_set)
+        missing_local = sorted((have - set(local_sheets)) & catalog_set)
         mode = '精确清单（v%s）' % dev.get('v', '?')
     else:
-        have = d.enc_uuids()
-        add = sorted(set(local_sheets) - have)
-        changed = [u for u in load_changed() if u in have and u in local_sheets]
-        # ⚠ 不能只比字节数：服务端重传的谱新旧大小可能完全相同（这次 4 首里
-        # 只有 1 首大小变了）。直接读回设备 enc 算 sha256 才判得准，且只读几份。
+        have = set(d.enc_uuids())
+        allowed = set(local_sheets) & catalog_set
+        add = sorted(allowed - have)
+        changed = [u for u in load_changed() if u in have and u in allowed]
+        # ⚠ 不能只比字节数：服务端重传的谱新旧大小可能完全相同，
+        # 直接读回设备 enc 算 sha256 才判得准，且只读少数几份。
         replace = sorted(u for u in changed
                          if d.enc_sha(u) != local_sheets[u]['h'])
-        orphan = sorted(have - set(local_sheets))
+        delisted = sorted(have - catalog_set)
+        missing_local = sorted((have - set(local_sheets)) & catalog_set)
         mode = '首次纳管（扫描现有 enc + 重传项逐份 hash 校验）'
-    print('曲包：%s | 补 %d / 替换 %d / 设备多出 %d'
-          % (mode, len(add), len(replace), len(orphan)))
+    print('曲包：%s | 补 %d / 替换 %d / 设备 enc %d（下架 %d / 清单缺曲 %d）'
+          % (mode, len(add), len(replace), len(have), len(delisted), len(missing_local)))
     if add[:3]:
         print('  补示例 %s' % ', '.join(add[:3]))
     if replace[:3]:
         print('  替换示例 %s' % ', '.join(replace[:3]))
-    if orphan[:3]:
-        print('  （下架曲目只报告不删）%s' % ', '.join(orphan[:3]))
+    if delisted[:3]:
+        print('  （%s）%s' % ('下架候选' if args.dry_run else '下架：设备与本地一并删',
+                              ', '.join(delisted[:3])))
+    if missing_local[:3]:
+        print('  （catalog 仍有但清单/本地缺包：只报告，不删）%s'
+              % ', '.join(missing_local[:3]))
 
     if args.dry_run:
         return
@@ -276,7 +305,38 @@ def sync_one(d, local, local_sha, local_vc, args, apk_path):
     else:
         print('谱包：无需推送')
 
-    # ---- 元数据（含设备侧版本清单与 App 指纹）----
+    # ---- 下架清理：只删 catalog 也没有的 uuid ----
+    # catalog 是下架判据；manifest 缺曲/本地缺包只能报告，不能作为删除依据。
+    # 设备删除成功后才删本地 zip；超过 50 个先不动 —— 那多半是 catalog 本身出了问题。
+    if delisted:
+        if len(delisted) > 50:
+            print('下架清理：%d 个，超过 50，先不自动删（catalog 可能有问题，先人工核对）'
+                  % len(delisted))
+        else:
+            removed = set()
+            for u in delisted:
+                if not u or '/' in u:
+                    continue
+                if d.rc('shell', 'rm', '-rf', '%s/sheets/%s' % (REMOTE, u)) == 0:
+                    removed.add(u)
+            loc_n = 0
+            for u in delisted:
+                if u not in removed:
+                    continue
+                p = os.path.join(BASE, 'library', 'sheets', u + '.zip')
+                if os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                        loc_n += 1
+                    except OSError as e:
+                        print('  !! 删本地包失败 %s：%s' % (u[:8], e))
+            failed = [u for u in delisted if u and '/' not in u and u not in removed]
+            if failed:
+                print('  !! 设备删除失败，保留本地 zip：%s' % ', '.join(failed[:3]))
+            print('下架清理：设备 %d / 本地 %d（共 %d 个下架）'
+                  % (len(removed), loc_n, len(delisted)))
+
+    # ---- 元数据（目录、封面与设备侧版本清单）----
     print('元数据：%s' % push_meta(d))
 
     # ---- 核对 ----
@@ -320,14 +380,17 @@ def main():
 
     with io.open(args.manifest, 'r', encoding='utf-8') as f:
         local = json.load(f)
+    catalog_set = catalog_uuids()
+    if not catalog_set:
+        raise SystemExit('catalog.json 没有曲目，拒绝同步（下架清理会误删）')
     local_sha = sha256_file(args.manifest)
     local_vc = apk_version_code(args.apk) if not args.no_apk else 0
     if not args.no_apk and local_vc == 0:
         raise SystemExit('读不出 APK 的 versionCode（aapt2 dump badging 失败）：%s'
                          % args.apk)
-    print('本机清单：%d 首 / catalog sha %s… / 清单 sha %s… / APK versionCode %s'
-          % (local['sheet_count'], local['catalog_sha256'][:12], local_sha[:12],
-             local_vc if local_vc else '(跳过)'))
+    print('本机清单：%d 首 / catalog %d 首 / catalog sha %s… / 清单 sha %s… / APK versionCode %s'
+          % (local['sheet_count'], len(catalog_set), local['catalog_sha256'][:12],
+             local_sha[:12], local_vc if local_vc else '(跳过)'))
 
     serials = args.serial or online_devices(args.adb)
     if not serials:
@@ -335,7 +398,8 @@ def main():
     print('目标设备：%s' % ', '.join(serials))
     for s in serials:
         try:
-            sync_one(Device(args.adb, s), local, local_sha, local_vc, args, args.apk)
+            sync_one(Device(args.adb, s), local, local_sha, local_vc,
+                     catalog_set, args, args.apk)
         except Exception as e:
             print('!! %s 同步异常：%s' % (s, e))
 
