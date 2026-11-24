@@ -60,7 +60,6 @@ MANIFEST = os.path.join(BASE, 'library', 'library_manifest.json')
 # 与 app/build.sh 里的 $BT 保持一致（读 APK 的 versionCode 要用 dump badging）
 AAPT2 = aapt2_path()
 DIFF = os.path.join(BASE, 'cache', 'catalog', 'catalog_diff.json')
-STAGE = os.path.join(BASE, 'cache', 'seed', 'ext')
 
 PKG = 'com.magicpig.piano'
 REMOTE = '/sdcard/Android/data/%s/files' % PKG
@@ -177,18 +176,6 @@ def catalog_uuids():
     return out
 
 
-def clear_stage():
-    """fast_push 会复用 cache/seed/ext 里的旧 enc；每次同步前清干净（逐个删）。"""
-    if not os.path.isdir(STAGE):
-        return
-    for root, dirs, files in os.walk(STAGE, topdown=False):
-        for f in files:
-            os.remove(os.path.join(root, f))
-        for d in dirs:
-            os.rmdir(os.path.join(root, d))
-    os.rmdir(STAGE)
-
-
 def push_meta(d, manifest_path=MANIFEST):
     d('shell', 'mkdir -p %s/covers %s/sheets' % (REMOTE, REMOTE))
     d('shell', 'touch %s/sheets/.nomedia' % REMOTE)
@@ -290,7 +277,8 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
 
     need = sorted(set(add) | set(replace))
     if need:
-        clear_stage()
+        # 暂存复用交给 unpack_backup.fast_push：它按源 zip 的 size+mtime 校验，
+        # 并按本次 need 清掉暂存里多余的 uuid，不再在这里整目录清空。
         cmd = [sys.executable, UNPACK, '--adb', d.adb, '--serial', serial,
                '--only-enc', '--no-catalog', '--no-covers', '--uuid'] + need
         r = run(cmd)

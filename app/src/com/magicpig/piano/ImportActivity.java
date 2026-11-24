@@ -16,9 +16,11 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -243,6 +245,24 @@ public class ImportActivity extends Activity {
         return -1;
     }
 
+    /**
+     * 读已有文件的 CRC32；读失败返回 -1（此时不做“已存在”跳过）。
+     *
+     * 资源包里的 sheet.xml.enc 是 ZIP_STORED，ZipInputStream 能直接拿到 entry 的
+     * CRC；只比大小会把「新包同大小、内容不同」的旧 enc 当成已完成。
+     * 复用调用方的 buffer，避免每条目各分配一份 256KB。
+     */
+    private long crc32(File f, byte[] buf) {
+        CRC32 crc = new CRC32();
+        try (FileInputStream in = new FileInputStream(f)) {
+            int n;
+            while ((n = in.read(buf)) > 0) crc.update(buf, 0, n);
+        } catch (Exception e) {
+            return -1;
+        }
+        return crc.getValue();
+    }
+
     private void doImport(Uri uri, File file, long total) {
         // 导到**外部专属目录**：和乐谱（SheetFetcher 的 files/sheets）同一个位置，
         // 用户要求"目录、封面、乐谱都放一块"。外部不可用时才退回内部。
@@ -279,9 +299,11 @@ public class ImportActivity extends Activity {
                 File out = safeDest(baseDir, name);
                 if (out == null) continue;                 // 路径不合法，跳过
                 final long size = e.getSize();
+                final long crc = e.getCrc();
                 processed++;
-                if (size > 0 && out.isFile() && out.length() == size) {
-                    skipped++;                              // 断点：已有且大小一致
+                if (size > 0 && out.isFile() && out.length() == size
+                        && crc >= 0 && crc32(out, buf) == crc) {
+                    skipped++;                              // 已有且大小、CRC 一致
                     read += size;
                     // 跳过也要刷进度：二次导入时绝大多数条目都走这一支，
                     // 原先这里直接 continue，进度条从头到尾不动。
@@ -300,7 +322,7 @@ public class ImportActivity extends Activity {
                     // 单个文件失败不中断整体（个别谱面坏包不该让整包作废），
                     // 但**必须记账**：失败也算"导入成功"就会走到删源那条路，
                     // 用户手里的包没了、曲库里还缺几首（不可逆）。
-                    // 半截文件一并删掉，否则下次断点判断会拿它当"已有且大小一致"跳过。
+                    // 半截文件一并删掉，否则下次判断会拿它当"已有且大小、CRC 一致"跳过。
                     failed++;
                     //noinspection ResultOfMethodCallIgnored
                     out.delete();

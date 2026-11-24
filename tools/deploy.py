@@ -24,6 +24,7 @@
   * 曲谱是**增量**的：设备已有就跳过，中断后重跑即可。
 """
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -83,23 +84,36 @@ def pick_serial(adb, cli_serial=None):
     return devs[0]
 
 
-def use_stage(args, subset):
+def catalog_stamp():
+    """catalog.json 的状态；曲库更新后换暂存，避免沿用旧曲集目录。"""
+    try:
+        st = os.stat(CATALOG)
+        return '%d:%d' % (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return '-'
+
+
+def use_stage(args, subset, uuids):
     """挑一个解压暂存目录。
 
     fast_push 是「整个暂存目录一次 push」，所以**暂存里混着别的东西就会被一起推走**：
     比如先全量铺过（暂存里 17969 首），再跑 --top 20，会把那 17969 首又推一遍。
-    因此按筛选条件分目录，并在筛选条件变化时清空，保证推的正是这次要的。
+    因此按筛选条件、catalog 状态和本次 uuid 集分目录，并在签名变化时清空，
+    保证推的正是这次要的。
     """
     import shutil
     import unpack_backup as U
+    stamp = catalog_stamp()
+    u_sig = hashlib.sha1('\n'.join(uuids).encode('utf-8')).hexdigest()[:12]
     if subset:
-        sig = 'part|%s|%s|%s' % (args.category or '', args.album or '', args.top or 0)
+        sig = 'part|%s|%s|%s|%s|%s' % (args.category or '', args.album or '',
+                                        args.top or 0, stamp, u_sig)
         d = os.path.join(BASE, 'cache', 'seed', 'part')
     elif args.full:
-        sig = 'full'
+        sig = 'full|%s|%s' % (stamp, u_sig)
         d = os.path.join(BASE, 'cache', 'seed', 'full')
     else:
-        sig = 'enc'
+        sig = 'enc|%s|%s' % (stamp, u_sig)
         d = os.path.join(BASE, 'cache', 'seed', 'ext')
     mark = os.path.join(d, '.filter')
     old = None
@@ -214,7 +228,7 @@ def main():
         import unpack_backup as U
         u = uuids_for(args)
         subset = bool(args.category or args.album or args.top)
-        stage = use_stage(args, subset)
+        stage = use_stage(args, subset, u)
         print('\n[2/2] 铺曲谱：%d 首（%s），暂存 %s'
               % (len(u), '全部文件' if args.full else '只铺 sheet.xml.enc',
                  os.path.basename(stage)))

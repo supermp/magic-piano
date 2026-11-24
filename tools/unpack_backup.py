@@ -24,6 +24,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,41 @@ PKG = 'com.magicpig.piano'
 
 # 本地解压暂存目录（deploy.py 会覆盖它，让「只铺 enc」和「铺全部文件」各用一份）
 STAGE_DIR = os.path.join(BASE, 'cache', 'seed', 'ext')
+
+
+def stage_meta_path(stage):
+    """暂存目录的来源记录放在目录外，避免随目录一起 adb push 到设备。"""
+    return stage + '.src.json'
+
+
+def load_stage_meta(stage):
+    try:
+        with io.open(stage_meta_path(stage), 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data.get('sheets'), dict):
+            return data
+    except Exception:
+        pass
+    return {'mode': '', 'sheets': {}}
+
+
+def save_stage_meta(stage, meta):
+    p = stage_meta_path(stage)
+    tmp = p + '.tmp'
+    try:
+        with io.open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, separators=(',', ':'))
+        os.replace(tmp, p)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def zip_key(zp):
+    st = os.stat(zp)
+    return '%d:%d' % (st.st_size, st.st_mtime_ns)
 
 
 def sheets_of_album(catalog, name):
@@ -82,19 +118,38 @@ def fast_push(args, uuids, adb):
     # 解压暂存目录（deploy.py 在"全量模式"下会换一个，避免和"只铺 enc"的暂存混在一起）
     stage = STAGE_DIR
     os.makedirs(stage, exist_ok=True)
+    mode = 'enc' if args.only_enc else 'all'
+    meta = load_stage_meta(stage)
+    if meta.get('mode') != mode:
+        for name in os.listdir(stage):
+            p = os.path.join(stage, name)
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+        meta = {'mode': mode, 'sheets': {}}
+    keep = set(uuids)
+    for name in os.listdir(stage):
+        p = os.path.join(stage, name)
+        if os.path.isdir(p) and name not in keep:
+            shutil.rmtree(p, ignore_errors=True)
+            meta['sheets'].pop(name, None)
     names = ['sheet.xml.enc'] if args.only_enc else None
 
     todo, missing = [], []
     for u in uuids:
         zp = os.path.join(BACKUP, u + '.zip')
-        if not os.path.exists(zp):
-            missing.append(u)
-            continue
         out_dir = os.path.join(stage, u)
         out_enc = os.path.join(out_dir, 'sheet.xml.enc')
-        if os.path.exists(out_enc) and os.path.getsize(out_enc) > 0:
+        if not os.path.exists(zp):
+            missing.append(u)
+            shutil.rmtree(out_dir, ignore_errors=True)
+            meta['sheets'].pop(u, None)
+            continue
+        src_key = zip_key(zp)
+        if os.path.exists(out_enc) and os.path.getsize(out_enc) > 0 \
+                and meta['sheets'].get(u) == src_key:
             todo.append(u)
             continue
+        shutil.rmtree(out_dir, ignore_errors=True)
         try:
             with zipfile.ZipFile(zp) as z:
                 take = names or [n for n in z.namelist() if not n.endswith('/')]
@@ -102,10 +157,13 @@ def fast_push(args, uuids, adb):
                 for n in take:
                     with open(os.path.join(out_dir, os.path.basename(n)), 'wb') as w:
                         w.write(z.read(n))
+            meta['sheets'][u] = src_key
             todo.append(u)
         except Exception as e:
+            meta['sheets'].pop(u, None)
             print('  !! 解包失败 %s: %s' % (u, e))
 
+    save_stage_meta(stage, meta)
     total = sum(os.path.getsize(os.path.join(stage, u, 'sheet.xml.enc'))
                 for u in todo if os.path.exists(os.path.join(stage, u, 'sheet.xml.enc')))
     print('本地暂存 %d 首 / %.2f GB；备份缺失 %d 首'
