@@ -403,9 +403,9 @@ public final class UfpTrial {
         // ⚠ 必须用 postAsync：post() 里 await 了 latch，等于同步，会把按停线程卡住。
         AlgoEngine.get().postAsync(() -> {
             // 判断依据是 **handler 归属**，不是会话代数：抢到新代数不代表已经
-            // create 过新 handler，按代数跳过就会把该释放的旧句柄留在 native 里。
-            if (sHandlerGen != handlerGen) {
-                Log.w(TAG, "stop：收尾时 handler 已被换掉（快照 gen " + handlerGen
+            // create 过新 handler；没有 handler（gen < 0）也不能执行收尾。
+            if (handlerGen < 0 || sHandlerGen != handlerGen) {
+                Log.w(TAG, "stop：收尾时 handler 不可用（快照 gen " + handlerGen
                         + "，当前 " + sHandlerGen + "），跳过 native 收尾");
                 return;
             }
