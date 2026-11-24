@@ -18,6 +18,7 @@ cache/catalog/catalog_diff.json 的历史基线假设。
 增量生成：已存在清单且该 uuid 的 `z`（本地 zip 的 size+mtime）与 `m` 都没变，
 就直接沿用旧的 `h`/`s` —— 不重复读全部谱包。只有新增、或本地 zip 被
 重新下载过（mtime 变化）的曲目才重新算 sha256。
+缺任一本地 zip 时直接失败，不写出缺曲的清单。
 
 用法：
   python tools/make_manifest.py            # 增量
@@ -73,6 +74,16 @@ def main():
     args = ap.parse_args()
 
     idx, catalog_sha, catalog_bytes = read_catalog()
+    missing = [uuid for uuid in sorted(idx)
+               if not os.path.isfile(os.path.join(SHEETS, uuid + '.zip'))]
+    if missing:
+        print('!! 缺 %d 个谱包，清单未写入：' % len(missing))
+        for uuid in missing[:20]:
+            print('   %s' % uuid)
+        if len(missing) > 20:
+            print('   ... 其余 %d 个' % (len(missing) - 20))
+        raise SystemExit('先补齐缺失谱包，再重跑 python tools/make_manifest.py')
+
     old = {}
     if not args.rehash and os.path.isfile(OUT):
         try:
@@ -94,9 +105,6 @@ def main():
     for i, uuid in enumerate(sorted(idx), 1):
         mtime = idx[uuid]
         zp = os.path.join(SHEETS, uuid + '.zip')
-        if not os.path.isfile(zp):
-            print('  !! 缺谱包 %s，跳过（会被同步脚本当作待补）' % uuid)
-            continue
         zkey = '%d:%d' % (os.path.getsize(zp), int(os.path.getmtime(zp)))
         cached = old.get(uuid)
         if cached and cached.get('z') == zkey and cached.get('m') == mtime \

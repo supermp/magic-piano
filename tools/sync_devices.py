@@ -21,7 +21,7 @@ App 的升级判据是 **versionCode** —— Android 的标准做法，PackageM
       - 设备有清单 → 精确算 add（本机有、设备无、catalog 仍列出）/
         replace（清单 hash 不同；mtime 变化时回读 enc hash 确认）/
         下架（设备实际有、catalog 无：删除）/
-        清单缺曲（catalog 仍有、本机清单/本地缺包：只报告）。
+        设备清单缺曲（catalog 仍有、设备实际有：按补包处理）。
       - 设备没有清单（首次纳管）→ 扫描设备现有 enc 的 uuid 集合，补 add；
         对 cache/catalog/catalog_diff.json 里标记为「内容重传」的曲目读回设备 enc
         算 sha256 再判 replace（重传新旧大小可能完全相同，不能只比字节数）。
@@ -55,6 +55,7 @@ ADB = adb_path()
 UNPACK = os.path.join(BASE, 'tools', 'unpack_backup.py')
 CATALOG = os.path.join(BASE, 'library', 'catalog.json')
 COVERS = os.path.join(BASE, 'library', 'covers')
+SHEETS = os.path.join(BASE, 'library', 'sheets')
 MANIFEST = os.path.join(BASE, 'library', 'library_manifest.json')
 # 与 app/build.sh 里的 $BT 保持一致（读 APK 的 versionCode 要用 dump badging）
 AAPT2 = aapt2_path()
@@ -188,11 +189,11 @@ def clear_stage():
     os.rmdir(STAGE)
 
 
-def push_meta(d):
+def push_meta(d, manifest_path=MANIFEST):
     d('shell', 'mkdir -p %s/covers %s/sheets' % (REMOTE, REMOTE))
     d('shell', 'touch %s/sheets/.nomedia' % REMOTE)
     ok = []
-    for src, dst in ((CATALOG, 'catalog.json'), (MANIFEST, 'library_manifest.json')):
+    for src, dst in ((CATALOG, 'catalog.json'), (manifest_path, 'library_manifest.json')):
         r = run([d.adb, '-s', d.serial, 'push', src, '%s/%s' % (REMOTE, dst)])
         ok.append('%s=%s' % (dst, 'ok' if r.returncode == 0 else 'FAIL'))
     r = run([d.adb, '-s', d.serial, 'push', COVERS + os.sep + '.',
@@ -259,10 +260,9 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
                 replace.append(u)
         # ⚠ 下架残留必须按设备上实际的 enc 文件算，不能只比清单：
         # 设备清单可能已不含它，只比清单会漏，enc 数也会一直多一个。
-        # 下架只认 catalog；manifest 缺曲/本地缺包只能报告，不能作为删除依据。
+        # 下架只认 catalog；设备清单缺曲不能作为删除依据。
         have = set(d.enc_uuids())
         delisted = sorted(have - catalog_set)
-        missing_local = sorted((have - set(local_sheets)) & catalog_set)
         mode = '精确清单（v%s）' % dev.get('v', '?')
     else:
         have = set(d.enc_uuids())
@@ -274,10 +274,9 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
         replace = sorted(u for u in changed
                          if d.enc_sha(u) != local_sheets[u]['h'])
         delisted = sorted(have - catalog_set)
-        missing_local = sorted((have - set(local_sheets)) & catalog_set)
         mode = '首次纳管（扫描现有 enc + 重传项逐份 hash 校验）'
-    print('曲包：%s | 补 %d / 替换 %d / 设备 enc %d（下架 %d / 清单缺曲 %d）'
-          % (mode, len(add), len(replace), len(have), len(delisted), len(missing_local)))
+    print('曲包：%s | 补 %d / 替换 %d / 设备 enc %d（下架 %d）'
+          % (mode, len(add), len(replace), len(have), len(delisted)))
     if add[:3]:
         print('  补示例 %s' % ', '.join(add[:3]))
     if replace[:3]:
@@ -285,9 +284,6 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
     if delisted[:3]:
         print('  （%s）%s' % ('下架候选' if args.dry_run else '下架：设备与本地一并删',
                               ', '.join(delisted[:3])))
-    if missing_local[:3]:
-        print('  （catalog 仍有但清单/本地缺包：只报告，不删）%s'
-              % ', '.join(missing_local[:3]))
 
     if args.dry_run:
         return
@@ -337,7 +333,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
                   % (len(removed), loc_n, len(delisted)))
 
     # ---- 元数据（目录、封面与设备侧版本清单）----
-    print('元数据：%s' % push_meta(d))
+    print('元数据：%s' % push_meta(d, args.manifest))
 
     # ---- 核对 ----
     enc = d.enc_uuids()
@@ -383,6 +379,19 @@ def main():
     catalog_set = catalog_uuids()
     if not catalog_set:
         raise SystemExit('catalog.json 没有曲目，拒绝同步（下架清理会误删）')
+    local_sheets = local.get('sheets')
+    if not isinstance(local_sheets, dict) or len(local_sheets) != local.get('sheet_count'):
+        raise SystemExit('清单不完整：sheets %d / sheet_count %s，先重跑 make_manifest'
+                         % (len(local_sheets or {}), local.get('sheet_count')))
+    missing_manifest = sorted(catalog_set - set(local_sheets))
+    if missing_manifest:
+        raise SystemExit('清单缺 %d 首（catalog 有、manifest 没有）：先重跑 make_manifest'
+                         % len(missing_manifest))
+    missing_zips = sorted(u for u in catalog_set
+                          if not os.path.isfile(os.path.join(SHEETS, u + '.zip')))
+    if missing_zips:
+        raise SystemExit('本地缺 %d 个谱包（清单/catalog 有）：先补包再同步'
+                         % len(missing_zips))
     local_sha = sha256_file(args.manifest)
     local_vc = apk_version_code(args.apk) if not args.no_apk else 0
     if not args.no_apk and local_vc == 0:
