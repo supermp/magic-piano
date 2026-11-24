@@ -12,7 +12,6 @@ import android.util.Log;
 import com.mangofuture.algo.SfeInterface;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 
 /**
@@ -66,14 +65,11 @@ public final class AlgoEngine {
     private boolean mInited;
     /** 跟弹用的 TFLite 模型是否已加载（演奏时才加载） */
     private String mSheetXml;
-    private volatile long mTotalSamples;
     private volatile int mMeasureCount;
     /** 物理小节索引 → 乐谱上印的小节号（见 buildMeasureNumbers）；空 = 还没建好 */
     private volatile int[] mMeasureNo = new int[0];
     /** 乐谱上印的最大小节号（进度条 "/ N" 用它，而不是物理小节数） */
     private volatile int mMeasureNoMax;
-    /** 小节号 → 起始采样。都是 -1 表示尚未建立 */
-    private volatile long[] mMeasureStart = new long[0];
     private volatile Player mPlayer;
     /**
      * 定位令牌：每次 seekTo / stop 都 +1。轮询里的定位 Runnable 开跑前对一下，
@@ -143,10 +139,8 @@ public final class AlgoEngine {
             if (mPlaySection != null) Log.i(TAG, "换曲：清掉上一首的试听区间");
             mPlaySection = null;
             // 先释放旧模块再建新的。预览模块是全局单例，直接对已存在的模块
-            // 再 init 一次不会复位播放游标 —— 上一次会话停在哪，这回 dryRun
-            // 就从哪开始算，最坏情况（上次停在曲尾）会算出「整曲 0 采样」，
-            // 进度条和时长全废。release + init 是唯一可靠的复位方式
-            // （resetCursor 用的也是这一套）。
+            // 再 init 一次不会复位播放游标 —— 上一次会话停在哪，这回就从哪开始播。
+            // release + init 是唯一可靠的复位方式（resetCursor 用的也是这一套）。
             SfeInterface.releasePreviewModule();
             if (!SfeInterface.initPreviewModule(mSheetXml)) {
                 throw new IllegalStateException("initPreviewModule 失败");
@@ -159,28 +153,6 @@ public final class AlgoEngine {
 
     public String getSheetXml() {
         return mSheetXml;
-    }
-
-    // ---------------- 时长缓存 ----------------
-
-    /**
-     * 灌入旧版本已经算好的时长与「小节→起始采样」表。
-     * 当前版本不再后台合成整曲计算时长；没有缓存时由调用方按小节数估算进度。
-     * 播放正确性不依赖这份缓存：播放会话自己会 resetCursor() 重建模块。
-     */
-    public void useCachedDuration(long totalSamples, long[] measureStart) {
-        if (totalSamples <= 0) return;
-        mTotalSamples = totalSamples;
-        if (measureStart != null && measureStart.length > 0) {
-            long[] a = new long[Math.max(measureStart.length,
-                    Math.max(64, Math.min(4096, mMeasureCount + 2)))];
-            Arrays.fill(a, -1L);
-            System.arraycopy(measureStart, 0, a, 0, measureStart.length);
-            a[0] = 0;
-            mMeasureStart = a;
-        }
-        Log.i(TAG, "使用缓存的时长：" + totalSamples + " 采样 ≈ "
-                + String.format("%.2f", totalSamples / (float) SAMPLE_RATE) + " 秒");
     }
 
     // ---------------- 手型（合手/右手/左手） ----------------
@@ -219,9 +191,8 @@ public final class AlgoEngine {
      *   静音右手 → 旋律(600-1400Hz)能量降 57%、贝斯保留。
      * 音量 100 = 默认满音量（实测与不设置时输出逐字节一致）。
      *
-     * 【为什么不重建模块】静音只是改音量，不改变合成时序，因此总采样数、
-     * 小节表、播放进度全部不变 —— 不需要停播、不需要重算时长、更不需要
-     * 重建预览模块（重建会把正在播放的 PCM 源头抽走，必然断音）。
+     * 【为什么不重建模块】静音只是改音量，不改变合成时序，播放进度也不变 ——
+     * 不需要停播，更不需要重建预览模块（重建会把正在播放的 PCM 源头抽走，必然断音）。
      *
      * 【线程安全】native 预览模块是全局单例，不能和 Player 线程的 playNext
      * 并发调用。所以：
@@ -270,10 +241,6 @@ public final class AlgoEngine {
         return ht;
     }
 
-    public long getTotalSamples() {
-        return mTotalSamples;
-    }
-
     public int getMeasureCount() {
         return mMeasureCount;
     }
@@ -294,78 +261,6 @@ public final class AlgoEngine {
     /** 乐谱上印的最大小节号（进度条 "/ N" 里的 N；没有编号信息时退回物理小节数） */
     public int getMeasureNumberTotal() {
         return mMeasureNoMax > 0 ? mMeasureNoMax : mMeasureCount;
-    }
-
-    /**
-     * 绝对采样位置 → 小节索引（进度条拖动用）。
-     *
-     * 优先按比例算：本首曲子每小节时值相同，比例换算既准、又随进度单调平滑
-     * （用块粒度实测表会在小节边界上跳变）。表里有实测值时以实测为准，
-     * 能兼顾前奏/变拍这类小节不等长的情况。
-     *
-     * ⚠ 两条保护：实测表来自**旧版本**空跑算时长的缓存，可能只覆盖
-     * 前面一段、末尾几项是 -1，直接采信会把"拖到最右"映射到倒数第 3~4 小节
-     * （用户报「总数比能拖到的最后一小节大」）。所以：
-     *   1. `abs` 到总采样（或超过）时，直接返回**最后一小节**；
-     *   2. 表格值只在比例值 ±2 小节内才采信，超出就认为表过期，用比例值。
-     */
-    public int measureAtSample(long abs) {
-        int mc = mMeasureCount;
-        if (mc <= 0) return 0;
-        int last = mc - 1;
-        long total = mTotalSamples;
-        if (total > 0 && abs >= total) return last;
-        int byTable = measureOfSample(abs);
-        int byRatio;
-        if (total > 0) {
-            byRatio = (int) (abs * mc / total);
-        } else {
-            byRatio = 0;
-        }
-        if (byRatio < 0) byRatio = 0;
-        if (byRatio > last) byRatio = last;
-        if (byTable >= 0 && Math.abs(byTable - byRatio) > 1) {
-            // 表值和比例值差得多：只在相差不大（±2 小节）时认表（小节确实不等长），
-            // 差得更多一定是旧缓存过期，按比例走
-            if (Math.abs(byTable - byRatio) <= 2) return byTable;
-        }
-        return byRatio;
-    }
-
-    /**
-     * 估算第 m 小节的起始采样，用于跳转后把进度条换算回绝对位置。
-     *
-     * 优先用旧缓存里的实测表；个别小节没记到（某些小节可能整小节都没有
-     * 音符位置回调）时，用已记录小节线性外推 —— 这首曲子速度恒定
-     * （4 拍 @108BPM × 88200Hz = 196000 采样/小节），外推值和实测一致。
-     */
-    public long estimateBase(int m) {
-        if (m <= 0) return 0;
-        long[] a = mMeasureStart;
-        if (m < a.length && a[m] >= 0) return a[m];
-        int last = -1;
-        for (int i = a.length - 1; i > 0; i--) {
-            if (a[i] >= 0) {
-                last = i;
-                break;
-            }
-        }
-        if (last > 0) return (long) ((double) a[last] * m / last);
-        long total = mTotalSamples;
-        int mc = mMeasureCount;
-        if (total > 0 && mc > 0) return (long) ((double) total * m / mc);
-        return 0;
-    }
-
-    /** 采样位置落在第几小节（小节表是块粒度的，够用于拖动定位）；未知返回 -1 */
-    public int measureOfSample(long samples) {
-        long[] a = mMeasureStart;
-        int idx = -1;
-        for (int i = 0; i < a.length; i++) {
-            if (a[i] >= 0 && a[i] <= samples) idx = i;
-            else if (a[i] > samples) break;
-        }
-        return idx;
     }
 
     /**
@@ -530,9 +425,9 @@ public final class AlgoEngine {
     // ---------------- 播放 ----------------
 
     public interface ProgressListener {
-        void onProgress(long samples, float seconds, int measure, int offset, int voice);
+        void onProgress(int measure, int offset, int voice);
 
-        void onEnded(long samples, float seconds);
+        void onEnded();
 
         void onError(String msg);
     }
@@ -552,14 +447,11 @@ public final class AlgoEngine {
      * 挪游标的，只要不调用就没有任何开销也没有声音；等用户按「试听」时，
      * start() 会按这个书签用正常路径（resetCursor → playFirst → setPlayPosition）
      * 从头建一次会话，结果一样。
-     *
-     * @return 目标的绝对采样位置，给进度条换算用
      */
-    public long movePlayheadTo(int measure, int voice, int offset) {
+    public void movePlayheadTo(int measure, int voice, int offset) {
         mHeadMeasure = measure;
         mHeadVoice = voice;
         mHeadOffset = offset;
-        return estimateBase(measure);
     }
 
     /** 当前播放头位置（演奏时作为"从这儿开始"的起点）。 */
@@ -755,8 +647,6 @@ public final class AlgoEngine {
         /** 兜底滞后量（缓冲区能容纳的采样数） */
         private volatile long mFallbackLag = BLOCK_SAMPLES;
 
-        /** 跳转起播时，该小节在整曲中的绝对采样位置（进度条要用） */
-        private volatile long mBaseSamples;
         private long mStartWall;
         private long mTickCount;
         private final ArrayList<Cue> mCues = new ArrayList<>();
@@ -850,10 +740,7 @@ public final class AlgoEngine {
                 offset = c.offset;
                 voice = c.voice;
             }
-            final long base = mBaseSamples;
             final int m = measure, o = offset, v = voice;
-            final long abs = played + base;
-            final float sec = abs / (float) SAMPLE_RATE;
 
             // 播放中让播放头跟着走：中途按停止再按「试听」，就从停下的地方接着听
             mHeadMeasure = m;
@@ -867,12 +754,12 @@ public final class AlgoEngine {
                 long wall = mStartWall > 0 ? SystemClock.elapsedRealtime() - mStartWall : 0;
                 long lag = wall - played * 1000L / SAMPLE_RATE;
                 Log.v(TAG, String.format(
-                        "sync played=%.2fs written=%.2fs wall=%dms lag=%dms m=%d base=%d",
+                        "sync played=%.2fs written=%.2fs wall=%dms lag=%dms m=%d",
                         played / (float) SAMPLE_RATE, mWrittenFrames / (float) SAMPLE_RATE,
-                        wall, lag, m, base));
+                        wall, lag, m));
             }
 
-            mUi.post(() -> mListener.onProgress(abs, sec, m, o, v));
+            mUi.post(() -> mListener.onProgress(m, o, v));
         }
 
         public void run() {
@@ -889,12 +776,11 @@ public final class AlgoEngine {
 
                 // 【先定位置，再开 ticker】ticker 每 60ms 按「已写入块的 cue 表」
                 // 换算位置汇报给 UI，而定位后第一块 PCM 要等 resetCursor + 合成
-                // 完才写得进去（实测 0.5~1 秒）。这段空窗期里 cue 表是空的、
-                // 绝对基准还是 0，ticker 一旦汇报就会把光标甩回第 1 个音符，
-                // 等真正的块写入后再跳到目标 —— 表现就是"先闪一下再播"。
-                // 所以这里提前把目标位置塞进 cue 表、把绝对基准算好。
+                // 完才写得进去（实测 0.5~1 秒）。这段空窗期里 cue 表是空的，
+                // ticker 一旦汇报就会把光标甩回第 1 个音符，等真正的块写入后再
+                // 跳到目标 —— 表现就是"先闪一下再播"。所以这里提前把目标位置
+                // 塞进 cue 表。
                 if (seek) {
-                    mBaseSamples = Math.max(0, estimateBase(mStartMeasure));
                     synchronized (mCues) {
                         mCues.add(new Cue(0, mStartMeasure, mOffset, mVoice));
                     }
@@ -982,8 +868,7 @@ public final class AlgoEngine {
                 // 抛过异常的也不再报：onError 已经把错误卡弹出来了，再报一次
                 // onEnded 会被当成"正常播完"覆盖掉错误状态、回写播放头。
                 if (!mStopRequested && !mErrored) {
-                    final long w = written;
-                    mUi.post(() -> mListener.onEnded(w, w / (float) SAMPLE_RATE));
+                    mUi.post(() -> mListener.onEnded());
                 }
                 if (mPlayer == this) mPlayer = null; // 只清理自己，不能误清新 Player
             }

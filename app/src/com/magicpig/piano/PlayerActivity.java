@@ -240,15 +240,15 @@ public class PlayerActivity extends Activity {
      */
     private final AlgoEngine.ProgressListener mProgress = new AlgoEngine.ProgressListener() {
         @Override
-        public void onProgress(long samples, float seconds, int measure, int offset, int voice) {
+        public void onProgress(int measure, int offset, int voice) {
             // 选段终点完全由 native setSection 在合成层负责（段外 PCM 不生成）。
             // 这里**不做**软件层截断：按 PCM 块（约 0.56s）判终点精度更差，
             // 还可能在"段内音符集合"与 native 终点不一致时抢跑、切掉段尾音。
-            runOnUiThread(() -> updateProgress(samples, seconds, measure, offset, voice, true));
+            runOnUiThread(() -> updateProgress(measure, offset, voice, true));
         }
 
         @Override
-        public void onEnded(long samples, float seconds) {
+        public void onEnded() {
             // native 播完（整曲曲末 / setSection 段尾）都走这一条
             runOnUiThread(() -> {
                 if (!uiGone()) finishPreviewAtStart();
@@ -790,12 +790,10 @@ public class PlayerActivity extends Activity {
         // 再矮就要靠扩大热区补偿，没必要。
 
         // ---- 一排：到开头 | 进度条(x 画在滑块上) | / N | 到结尾 ----
-        // 原来进度条独占一行、小字再占一行；用户指出小字那行"留了很大空余地方"，
-        // 现在把小节信息并进同一排（进度条右端、紧挨着它），
-        // 省掉整整一行高度（约 14dp）。又按用户要求再瘦身：
-        // 当前小节 x 画到进度条的金色滑块上，右边文字只剩 "/ N"。
-        // 上一首/下一首搬到顶栏（见 buildUi），这里只剩左右两个
-        // 边缘跳转，按钮和进度条之间各留 10dp —— 两种图标不再相邻，不会点混。
+        // 小节信息并进进度条同一排（右端紧挨着它），省一整行高度（约 14dp）：
+        // 当前小节 x 画在金色滑块上，右边文字只剩 "/ N"。
+        // 上一首/下一首在顶栏（见 buildUi），这里只剩左右两个边缘跳转，
+        // 按钮和进度条之间各留 10dp —— 两种图标不相邻，不会点混。
         LinearLayout barRow = new LinearLayout(this);
         barRow.setOrientation(LinearLayout.HORIZONTAL);
         barRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1334,9 +1332,9 @@ public class PlayerActivity extends Activity {
     /**
      * 进度条滑块：金色圆点 + **当前小节号**（1-based）。
      *
-     * 原来「第 x / N 小节」整串放在进度条右边太占宽度，改成
-     * x 画在小球上、右边只剩 "/ N"。数字用**固定 dp 字号**（不跟 Ui.sp 的
-     * fontScale 缩），否则真机上 0.5x 缩放后三位小节号根本看不清。
+     * 当前小节 x 画在小球上、右边只剩 "/ N"，不把「第 x / N 小节」整串放右边占宽度。
+     * 数字用**固定 dp 字号**（不跟 Ui.sp 的 fontScale 缩），否则真机上
+     * 0.5x 缩放后三位小节号根本看不清。
      * 不持有 Activity / View，只持有 Paint —— 长生命周期的 Drawable 安全。
      */
     private static class MeasureThumb extends android.graphics.drawable.Drawable {
@@ -1520,12 +1518,11 @@ public class PlayerActivity extends Activity {
                 mSheet.unlockPreviewCursor();
             }
         }
-        long abs = AlgoEngine.get().movePlayheadTo(measure, voice, offset);
+        AlgoEngine.get().movePlayheadTo(measure, voice, offset);
         mCurMeasure = measure;
         // updateProgress 负责 mSeek.setProgress + 状态行 + 谱面光标；
         // 后面再补一次 setMeasureStatus，压住 mScrubbing 时跳过的那次。
-        updateProgress(abs, (float) abs / AlgoEngine.SAMPLE_RATE,
-                measure, offset, voice, followScroll);
+        updateProgress(measure, offset, voice, followScroll);
         setMeasureStatus(measure);
     }
 
@@ -1761,10 +1758,7 @@ public class PlayerActivity extends Activity {
         mPreviewScrollPending = true;   // 这一次允许滚回开头
         mFollowGraceUntilMs = SystemClock.elapsedRealtime() + FOLLOW_GRACE_MS;
         mCurMeasure = m;
-        long total = AlgoEngine.get().getTotalSamples();
-        int mc = AlgoEngine.get().getMeasureCount();
-        long at = (total > 0 && mc > 0) ? total * m / mc : 0;
-        updateProgress(at, (float) at / AlgoEngine.SAMPLE_RATE, m, o, v, true);
+        updateProgress(m, o, v, true);
         if (forceViewport) mSheet.moveToStart(m, o, v);
         setMeasureStatus(m);
     }
@@ -3313,8 +3307,8 @@ public class PlayerActivity extends Activity {
             return;
         }
         // 选段与光标写在**同一个** recent.json 里，一次落盘即可；
-        // 分成两次写会各触发一次全量序列化 + fsync（最多 50 条记录、每条还带
-        // measures 小节表），退出曲谱时白等一趟 IO。
+        // 分成两次写会各触发一次全量序列化 + fsync（最多 50 条记录），
+        // 退出曲谱时白等一趟 IO。
         store.saveReadingState(uuid,
                 secOn ? new int[]{mSecStartM, mSecStartO, mSecStartV,
                         mSecEndM, mSecEndO, mSecEndV} : null,
@@ -3858,19 +3852,16 @@ public class PlayerActivity extends Activity {
         seekToNote(m, 0, 0, true);
     }
 
-    /** 小节 → 进度条位置（‰），带采样估算。
+    /** 小节 → 进度条位置（‰）：多小节时首小节 0、末小节 1000；单小节固定 0。
      *
-     * 所有"直接摆滑块"的地方（回弹、到开头/到结尾）都走它，**不要各写一套**：
-     * 曾经 `jumpToEdge` 用 `target*1000/(mc-1)`、`updateProgress` 用采样比例，
-     * 同一个位置能算出两个不同的滑块值。
+     * 所有需要按小节换算的滑块位置都走它，**不要各写一套**：
+     * 同一位置用两种公式会算出两个不同的滑块值。
      */
     private int progressOfMeasure(int measure) {
         int mc = AlgoEngine.get().getMeasureCount();
         if (mc <= 0) return 0;
         int m = Math.max(0, Math.min(measure, mc - 1));
-        long total = AlgoEngine.get().getTotalSamples();
-        long at = total > 0 ? AlgoEngine.get().estimateBase(m) : 0;
-        return measureToProgress(m, at, total);
+        return measureToProgress(m);
     }
 
     /**
@@ -3879,9 +3870,6 @@ public class PlayerActivity extends Activity {
      * 两个调用场景：① 选段生效/演奏中拖到段外被拒；② 横向划动被载入卡片中途
      * 接管（手势的 UP/CANCEL 进不来，见 dispatchTouchEvent）。
      *
-     * ⚠ 必须按"播放头 + 小节起点"重算，不能拿"最近一次 ticker 报的采样"：
-     * 跳转之后播放头已经在新小节，而那个采样还是旧位置的 ——
-     * 两者组合会把滑块甩到最左边（第 200 小节的采样 ÷ 整曲 ≈ 1‰）。
      * 状态行一起刷：只回弹滑块会出现"小球在曲首、右边写着第 200 小节"。
      */
     private void restoreSeekToRealPosition() {
@@ -3892,48 +3880,36 @@ public class PlayerActivity extends Activity {
     }
 
     /**
-     * 小节 → 进度条位置（‰）。
+     * 小节 → 进度条位置（‰）：多小节时首小节 0、末小节 1000；单小节固定 0。
      *
-     * 有采样缓存就按采样算（小节不等长时更准），没有就按小节数等分。
-     * 与 {@link #measureOfProgress} 也就是"各自取整"的误差，**不做贴边特例**：
-     * 曾经把"最后一小节强制 1000‰"以避免滑块差一小格，但那会让播放中整个最后一
-     * 小节钉在 100%（音乐还在走）；而且用户真正在意的"数字对不上"是印刷号问题，
-     * 跟这 3‰ 无关。
-     * 代价：定位到最后一小节时滑块离右端约 (3‰ × 轨道宽)，可接受。
+     * 以 (mc-1) 为分母，让最后一小节正好落在最右端；{@link #measureOfProgress}
+     * 用同一组端点反算，只差整数取整。
      */
-    private static int measureToProgress(int measure, long samples, long totalSamples) {
+    private static int measureToProgress(int measure) {
         int mc = AlgoEngine.get().getMeasureCount();
-        if (mc <= 0) return 0;
-        if (totalSamples > 0) {
-            long p = samples * 1000L / totalSamples;
-            return (int) Math.max(0, Math.min(1000, p));
-        }
-        return Math.max(0, Math.min(1000, measure * 1000 / mc));
+        if (mc <= 1) return 0;
+        return Math.max(0, Math.min(1000, Math.round(measure * 1000f / (mc - 1))));
     }
 
     /**
-     * 进度条位置 -> 小节号。
+     * 进度条位置 -> 小节号：多小节时 0‰ 是第 1 小节、1000‰ 是最后一小节；
+     * 单小节固定 0。
      *
-     * 有总采样数就按采样换算（精确）；没有就按小节数等分 —— 小节数从 XML 直接数，
-     * 不需要整曲合成。代价：没算过时长的曲子，进度条粒度是"小节"而不是"采样"，
-     * 拖动定位仍然准确（定位本来就是按小节走的）。
+     * 与 {@link #measureToProgress} 共用同一组端点，中间取最近的小节。小节数从
+     * XML 直接数，不需要整曲合成；进度条粒度是"小节"而不是"采样"。
      */
     private static int measureOfProgress(int progress) {
-        long total = AlgoEngine.get().getTotalSamples();
         int mc = AlgoEngine.get().getMeasureCount();
         if (mc <= 1) return 0;
-        if (total > 0) {
-            return AlgoEngine.get().measureAtSample(total * progress / 1000L);
-        }
-        // 等分映射：第 m 小节占 [m*1000/mc, (m+1)*1000/mc)，满进度落在 mc → 夹到 mc-1，
-        // 所以"拖到最右 = 最后一小节"成立。反方向的 measureToProgress 不做贴边特例，
-        // 最后一小节是 997‰（差 3‰ ≈ 几个像素），滑块不会"拖不到底"。
-        int m = mc * progress / 1000;
+        // 端点映射：第 m 小节在 m*1000/(mc-1)，满进度就是 mc-1（最后一小节）。
+        // 取最近的小节，保证拖到最右/滑块回到该位置时都落在同一小节。
+        int p = Math.max(0, Math.min(1000, progress));
+        int m = Math.round((mc - 1) * p / 1000f);
         return Math.max(0, Math.min(mc - 1, m));
     }
 
     /**
-     * 刷新进度条、时间与谱面光标。
+     * 刷新进度条、状态行与谱面光标。
      * 播放中由 ticker 每 60ms 调；点谱面静默跳转时调一次。
      *
      * @param followScroll 允许视口跟到目标小节。
@@ -3946,8 +3922,7 @@ public class PlayerActivity extends Activity {
      *                     回曲首/回段首/拖进度条这类"必须让它出现在画面里"
      *                     的场景传 true。
      */
-    private void updateProgress(long samples, float seconds, int measure, int offset, int voice,
-                                boolean followScroll) {
+    private void updateProgress(int measure, int offset, int voice, boolean followScroll) {
         // 跳转（进度条/点谱面）的瞬间，引擎会先报一个 (-1,-1,-1) 的"位置未知"。
         // 拿它去刷状态行 → 小节数闪回第 1 小节；拿它去挪光标 → 光标被定住。
         // 实测：PROG m=-1 o=-1 v=-1 与真实位置交替出现，就是用户看到的反复跳。
@@ -3961,8 +3936,7 @@ public class PlayerActivity extends Activity {
         mCurMeasure = measure;
         if (!mScrubbing) {
             // 手指按在进度条上时别让 ticker 把进度条和状态行抢回去
-            mSeek.setProgress(measureToProgress(measure, samples,
-                    AlgoEngine.get().getTotalSamples()));
+            mSeek.setProgress(measureToProgress(measure));
             setMeasureStatus(measure);
         }
         // 谱面跟随：默认把光标挪到当前播放位置；只有起播那一次（以及用户
@@ -4037,13 +4011,10 @@ public class PlayerActivity extends Activity {
      * 写成「第 2 / 64 小节」而不是「第 2 小节　/　共 64 小节」：后者把"小节"
      * 这个词重复了两遍，读起来绕，铺在底部又占宽。
      *
-     * 这一行历史上被当成过公告栏：时长（"就绪 · 时长计算中…" / "00:12 · 第 3 小节"）、
-     * 跳转提示、手型切换提示、演奏准备/得分/评语、各种出错文案……
-     * 用户最终的规矩是**一句别的字都不许有**，于是这些东西各有去处：
-     *   - 演奏准备中 → 删掉（准备那一两秒没文字也不影响，按钮已经变成「演奏中」）
-     *   - 演奏得分/评语、演奏中断的原因 → {@link #showTrialResult} 弹窗
-     *   - 打不开/播放中断/拦截 → {@link #toast} 提示
-     *   - 冷启动解包 → {@link #buildLoading} 居中加载卡片
+     * 状态行只放小节号，不承载时长、跳转提示、手型切换、演奏准备/得分/评语
+     * 或错误文案。演奏准备期间不写额外提示（按钮已经变成「演奏中」）；得分/评语
+     * 和中断原因走 {@link #showTrialResult}，打不开/播放中断/拦截走 {@link #toast}，
+     * 冷启动解包走 {@link #buildLoading} 居中加载卡片。
      * 演奏态也不加「演奏中」前缀：顶栏那个按钮的文字已经切成了「演奏中」，
      * 状态行再来一遍是重复信息。
      */
@@ -4105,16 +4076,9 @@ public class PlayerActivity extends Activity {
                 Log.i(TAG, "分手可行=" + canSplit
                         + " 右手音=" + hands[0] + " 左手音=" + hands[1]);
 
-                // 旧版本算过的时长可以直接用；没有缓存就按小节数估算进度，
-                // 不再为了精确时长在后台合成整曲。存档以乐曲 uuid 为键。
+                // 存档以乐曲 uuid 为键。
                 final String sheetUuid = LibraryStore.uuidOfPath(mEncPath);
                 LibraryStore store = LibraryStore.get(this);
-                long cachedTotal = sheetUuid == null ? 0 : store.cachedDuration(sheetUuid);
-                long[] cachedStarts = sheetUuid == null ? null
-                        : store.cachedMeasureStarts(sheetUuid);
-                if (cachedTotal > 0) {
-                    AlgoEngine.get().useCachedDuration(cachedTotal, cachedStarts);
-                }
 
                 // 曲名只有一个来源：**目录（catalog）里的 name**。
                 // 这不是偏好问题——拆开原版 APK 查过：dex 里 work-title / credit-words /
@@ -4161,8 +4125,7 @@ public class PlayerActivity extends Activity {
                 // 否则上一首停在哪儿，这一首点「试听/演奏」就从哪儿开始。
                 if (resumeCursor == null) AlgoEngine.get().movePlayheadTo(0, 0, 0);
 
-                // 谱面立刻上屏，**不等时长估算**：时长只影响进度条显示，
-                // 不影响播放本身（播放会话自己会重建模块）。
+                // 谱面立刻上屏；播放会话自己会重建模块，不依赖整曲时长预计算。
                 runOnUiThread(() -> {
                     // 加载期间用户已经返回：谱面不用再画了（Activity 已 finish，
                     // 继续往 WebView 灌 100 万字符只是白耗 CPU）
@@ -4242,8 +4205,7 @@ public class PlayerActivity extends Activity {
                         }
                     }
                 });
-                Log.i(TAG, "启动耗时：谱面上屏 " + (SystemClock.elapsedRealtime() - t0) + "ms"
-                        + (cachedTotal > 0 ? "（时长走旧缓存）" : "（进度按小节估算）"));
+                Log.i(TAG, "启动耗时：谱面上屏 " + (SystemClock.elapsedRealtime() - t0) + "ms");
 
                 // 兜底：渲染回调万一没来（谱面异常），10 秒后必须把遮罩撤掉、
                 // 按钮放开，否则用户就一直卡在"正在载入曲谱"上。
@@ -4348,11 +4310,9 @@ public class PlayerActivity extends Activity {
         // （有选段时 target 已经是段首 / 段尾，见上面的 clamp）。
         if (!mPreviewActive && !AlgoEngine.get().isPlaying()) {
             // 有选段时起点/终点不是曲首/曲末，滑块必须按真实位置摆：
-            // 钉在最左/最右却和球上的小节号矛盾。
-            // 映射走 progressOfMeasure（与拖进度条同一套），别再写第二套
-            // target*1000/(mc-1)：同一位置两个公式会给出两个不同的滑块值。
-            boolean sec = mSecOn && (toStart ? mSecStartM >= 0 : mSecEndM >= 0);
-            mSeek.setProgress(sec && mc > 1 ? progressOfMeasure(target)
+            // 钉在最左/最右却和球上的小节号矛盾。多小节统一走 progressOfMeasure；
+            // 单小节没有可区分的中间位置，直接贴两端。
+            mSeek.setProgress(mc > 1 ? progressOfMeasure(target)
                     : (toStart ? 0 : 1000));
             setMeasureStatus(target);
         }

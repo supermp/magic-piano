@@ -23,10 +23,9 @@ import java.util.Set;
  * 本地曲库状态，**拆成三个互不影响的文件**：
  *
  * <pre>
- * files/recent.json      最近打开（含时长缓存）
+ * files/recent.json      最近打开
  *   { "v": 1,
- *     "sheets": { "<乐曲uuid>": { "played": 1792…, "dur": 10105236,
- *                                "measures": "0,264608,…" } } }
+ *     "sheets": { "<乐曲uuid>": { "played": 1792…, "m": 12, "o": 3, "v": 0 } } }
  *
  * files/fav_sheets.json  收藏的乐曲
  *   { "v": 1, "sheets": ["uuid", …] }
@@ -42,7 +41,7 @@ import java.util.Set;
  * 通用约定：
  *  - **一律以 uuid 为键**，不存文件路径（换包名/换存储目录就失效过）；
  *  - **不存曲名**，名字一律从内置目录（SheetCatalog）现取；
- *  - played 给列表排序；dur/measures 是旧版本留下的时长缓存，只读、不再产生新值。
+ *  - played 给列表排序。
  */
 public final class LibraryStore {
 
@@ -67,8 +66,6 @@ public final class LibraryStore {
     /** 一首曲子的本地状态。 */
     private static final class Entry {
         long played;          // 最后一次打开（0 = 没打开过）
-        long duration;        // 缓存的整曲采样数（0 = 没算过）
-        String measures;      // 小节→起始采样表，逗号分隔
         // 上次退出曲谱时光标所在的音符（-1 = 没记录过）。重新进入时自动定位过去。
         int curMeasure = -1;
         int curOffset;
@@ -188,28 +185,6 @@ public final class LibraryStore {
         return out;
     }
 
-    // ---------------- 时长缓存 ----------------
-
-    public synchronized long cachedDuration(String uuid) {
-        Entry e = mRecent.get(uuid);
-        return e == null ? 0L : e.duration;
-    }
-
-    public synchronized long[] cachedMeasureStarts(String uuid) {
-        Entry e = mRecent.get(uuid);
-        if (e == null || e.measures == null || e.measures.isEmpty()) return null;
-        String[] p = e.measures.split(",");
-        long[] out = new long[p.length];
-        for (int i = 0; i < p.length; i++) {
-            try {
-                out[i] = Long.parseLong(p[i].trim());
-            } catch (NumberFormatException ex) {
-                return null;   // 表坏了就由调用方按小节数估算
-            }
-        }
-        return out;
-    }
-
     // ---------------- 光标位置 ----------------
 
     /**
@@ -240,7 +215,7 @@ public final class LibraryStore {
      * 一次写完"阅读现场"：选段 + 光标位置，只落盘一次。
      *
      * 选段和光标同在 recent.json 里，一次写完只落盘一次。分成两次写会各跑一遍
-     * "序列化最多 50 条记录（每条还带 measures 小节表）+ 写临时文件 + fsync"，
+     * "序列化最多 50 条记录 + 写临时文件 + fsync"，
      * 退出曲谱时白等一趟 IO。
      *
      * @param sec     `{startM,startO,startV,endM,endO,endV}`；null / 长度不足 = 清除选段
@@ -361,8 +336,6 @@ public final class LibraryStore {
                 if (jo == null) continue;
                 Entry e = new Entry();
                 e.played = jo.optLong("played");
-                e.duration = jo.optLong("dur");
-                e.measures = jo.optString("measures");
                 e.curMeasure = jo.optInt("m", -1);
                 e.curOffset = jo.optInt("o", 0);
                 e.curVoice = jo.optInt("v", 0);
@@ -415,9 +388,8 @@ public final class LibraryStore {
     private void saveRecent() {
         try {
             JSONObject sheets = new JSONObject();
-            // 只留最近 50 首：打开次数一多，recent.json 会无限增长
-            // （每首还带 measures 小节表，几百条下来就是几十 KB）。按 played
-            // 倒序取前 50，超出部分的缓存时长一起丢掉（下次打开再算）。
+            // 只留最近 50 首：打开次数一多，recent.json 会无限增长。
+            // 按 played 倒序取前 50，超出的整条丢掉。
             List<Map.Entry<String, Entry>> entries = new ArrayList<>(mRecent.entrySet());
             java.util.Collections.sort(entries,
                     (a, b) -> Long.compare(b.getValue().played, a.getValue().played));
@@ -425,11 +397,9 @@ public final class LibraryStore {
             for (int i = 0; i < end; i++) {
                 Map.Entry<String, Entry> kv = entries.get(i);
                 Entry e = kv.getValue();
-                if (e.played <= 0 && e.duration <= 0) continue;   // 空壳不落盘
+                if (e.played <= 0) continue;   // 空壳不落盘
                 JSONObject jo = new JSONObject();
                 jo.put("played", e.played);
-                jo.put("dur", e.duration);
-                jo.put("measures", e.measures == null ? "" : e.measures);
                 if (e.curMeasure >= 0) {
                     jo.put("m", e.curMeasure);
                     jo.put("o", e.curOffset);
@@ -447,8 +417,7 @@ public final class LibraryStore {
                 sheets.put(kv.getKey(), jo);
             }
             // 内存表也裁到同样的 MAX_RECENT 条：mRecent 只在 touch() 里增、
-            // 从不减，一局打开几百首，每首的 measures 小节表（几 KB）会一直
-            // 留到进程结束。落盘既然只留 50 条，内存也保持一致。
+            // 从不减；落盘既然只留 50 条，内存也保持一致。
             for (int i = end; i < entries.size(); i++) {
                 mRecent.remove(entries.get(i).getKey());
             }
