@@ -18,10 +18,10 @@ App 的升级判据是 **versionCode** —— Android 的标准做法，PackageM
 
 同步流程：
   · 曲包：
-      - 设备有清单 → 精确算 add（本机有、设备无、catalog 仍列出）/
+      - 设备有清单 → 精确算 add（本机有、设备无、catalog 仍列出；
+        设备清单有、但设备实际缺 enc 的也补）/
         replace（清单 hash 不同；mtime 变化时回读 enc hash 确认）/
-        下架（设备实际有、catalog 无：删除）/
-        设备清单缺曲（catalog 仍有、设备实际有：按补包处理）。
+        下架（设备实际有、catalog 无：删除）。
       - 设备没有清单（首次纳管）→ 扫描设备现有 enc 的 uuid 集合，补 add；
         对 cache/catalog/catalog_diff.json 里标记为「内容重传」的曲目读回设备 enc
         算 sha256 再判 replace（重传新旧大小可能完全相同，不能只比字节数）。
@@ -36,6 +36,7 @@ App 的升级判据是 **versionCode** —— Android 的标准做法，PackageM
   python tools/sync_devices.py --serial <serial>   # 单台
   python tools/sync_devices.py --dry-run             # 只看差异报告
   python tools/sync_devices.py --no-apk             # 只同步曲包
+  python tools/sync_devices.py --force              # 设备清单有、但 enc 全缺时仍重铺
 """
 import argparse
 import hashlib
@@ -130,8 +131,19 @@ class Device:
         return int(m.group(1)) if m else 0
 
     def enc_uuids(self):
-        out = self('shell', 'find %s/sheets -name sheet.xml.enc 2>/dev/null' % REMOTE)
-        return set(UUID_RE.findall(out or ''))
+        """返回设备实际存在的 enc uuid。
+
+        `find` 的命令失败（adb 断连、设备存储异常）必须抛异常，不能把空结果
+        当成“设备上一首都没有”；目录不存在则视为合法空集。否则调用方可能
+        把整库重推一遍，或反过来漏掉真正需要补的包。
+        """
+        cmd = ('if [ -d %s/sheets ]; then '
+               'find %s/sheets -name sheet.xml.enc; fi') % (REMOTE, REMOTE)
+        r = run([self.adb, '-s', self.serial, 'shell', cmd])
+        if r.returncode != 0:
+            raise RuntimeError('读取设备 enc 列表失败：%s'
+                               % ((r.stderr or r.stdout or '').strip()[-200:]))
+        return set(UUID_RE.findall((r.stdout or '').replace('\r', '')))
 
     def cover_count(self):
         out = self('shell', 'ls %s/covers/*.jpg 2>/dev/null | wc -l' % REMOTE)
@@ -233,12 +245,30 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
     except Exception:
         dev = None
     local_sheets = local['sheets']
+    manifest_gap = []
     if dev and isinstance(dev.get('sheets'), dict):
         ds = dev['sheets']
         allowed = set(local_sheets) & catalog_set
-        add = sorted(allowed - set(ds))
+        # 设备清单不等于设备现实：清单有、实际 enc 文件不存在时，
+        # 也要并入待补集合，否则最后只能报“需复查”，下一轮仍然不补。
+        # 这里只判断存在性；大小/内容不逐份扫描（全库读一遍代价太高）。
+        have = set(d.enc_uuids())
+        # 清单说有一堆、实际一个都读不到：可能是 sheets 目录被清空，
+        # 也可能是 adb/存储异常。按“全部都缺”处理会把整库重推一遍；
+        # 默认跳过这台，确认确实要重铺时显式加 --force。
+        if ds and not have:
+            print('  !! 设备清单有 %d 首，但读不到任何 enc；'
+                  '疑似目录被清空或设备异常' % len(ds))
+            if not args.force:
+                print('    已跳过这台；确认要重铺整库请加 --force')
+                return
+            print('    --force 已指定，按全量待补继续')
+        manifest_gap = sorted((allowed & set(ds)) - have)
+        add = sorted((allowed - set(ds)) | set(manifest_gap))
         replace = []
         for u in sorted(allowed & set(ds)):
+            if u not in have:
+                continue   # 实际文件缺失，已由 add 接管；不要同时算替换
             want = local_sheets[u]['h']
             dev_h = ds[u].get('h')
             if dev_h != want:
@@ -248,7 +278,6 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
         # ⚠ 下架残留必须按设备上实际的 enc 文件算，不能只比清单：
         # 设备清单可能已不含它，只比清单会漏，enc 数也会一直多一个。
         # 下架只认 catalog；设备清单缺曲不能作为删除依据。
-        have = set(d.enc_uuids())
         delisted = sorted(have - catalog_set)
         mode = '精确清单（v%s）' % dev.get('v', '?')
     else:
@@ -266,6 +295,9 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
           % (mode, len(add), len(replace), len(have), len(delisted)))
     if add[:3]:
         print('  补示例 %s' % ', '.join(add[:3]))
+    if manifest_gap[:3]:
+        print('  清单有、实际缺 enc %d 首：%s'
+              % (len(manifest_gap), ', '.join(manifest_gap[:3])))
     if replace[:3]:
         print('  替换示例 %s' % ', '.join(replace[:3]))
     if delisted[:3]:
@@ -290,7 +322,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
         print('谱包：无需推送')
 
     # ---- 下架清理：只删 catalog 也没有的 uuid ----
-    # catalog 是下架判据；manifest 缺曲/本地缺包只能报告，不能作为删除依据。
+    # catalog 是下架判据；设备清单不等于实际文件，删除只看 catalog 和实际 enc。
     # 设备删除成功后才删本地 zip；超过 50 个先不动 —— 那多半是 catalog 本身出了问题。
     if delisted:
         if len(delisted) > 50:
@@ -353,6 +385,8 @@ def main():
     ap.add_argument('--serial', action='append', default=[])
     ap.add_argument('--no-apk', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--force', action='store_true',
+                    help='设备清单非空但实际 0 个 enc 时仍按全量待补继续（默认跳过）')
     args = ap.parse_args()
 
     if not os.path.isfile(args.manifest):
