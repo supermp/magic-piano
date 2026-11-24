@@ -226,7 +226,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - `library/covers/`：曲集封面；缺目录或封面会导致名称/封面显示退化。
 - `library/sheets/<uuid>.zip`：含 `sheet.xml.enc`；设备路径为 `Android/data/com.magicpig.piano/files/sheets/<uuid>/sheet.xml.enc`。
 - `library/library_manifest.json`：记录 catalog 哈希及每首谱包 mtime、enc 哈希、字节数，供多设备精确增量同步；由 `make_manifest.py` 生成。
-- `dist/magicpiano-library-YYYYMMDD.zip`：SAF 曲库导入包；默认全量打包成功后自动清理旧包，只留一份。
+- `dist/magicpiano-library-YYYYMMDD.zip`：SAF 曲库导入包；默认全量打包成功后自动清理旧包，只留一份；带筛选（`--category` / `--album` / `--top`，可组合）时文件名追加对应后缀（如 `…-考级-top500.zip`、`…-album-某曲集.zip`），能与全量包共存，不触发清理；`make_bundle` 缺谱包默认拒绝，`fetch_sheet_zips` 有失败默认非零退出，确需放行时分别加 `--allow-missing` / `--allow-fail`。
 - `cache/catalog/`：`update_catalog.py` 的全量抓取快照与差异；可重建。
 
 ### 更新曲包

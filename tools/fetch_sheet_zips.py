@@ -18,7 +18,9 @@
 用法：
     python tools/fetch_sheet_zips.py                 # 全量备份到 library/sheets/
     python tools/fetch_sheet_zips.py --workers 12    # 调整并发
+    python tools/fetch_sheet_zips.py --allow-fail    # 有失败也以 0 退出（默认非零）
 """
+import argparse
 import io
 import json
 import os
@@ -94,7 +96,7 @@ def download(uuid, url):
                 time.sleep(1.5 * (attempt + 1))
 
 
-def main():
+def main(allow_fail=False):
     os.makedirs(OUT, exist_ok=True)
     cat = json.load(open(CATALOG, encoding='utf-8'))
     uuids = []
@@ -156,14 +158,20 @@ def main():
     }
     with io.open(os.path.join(OUT, 'manifest.json'), 'w', encoding='utf-8') as f:
         json.dump(manifest, f, ensure_ascii=False, indent=1)
-    print('\n完成：成功 %d / 跳过 %d / 失败 %d，共 %.2f MB，耗时 %.1f 分钟'
-          % (_stats['ok'], _stats['skip'], _stats['fail'],
+    status = '完成但有失败' if _failed else '完成'
+    print('\n%s：成功 %d / 跳过 %d / 失败 %d，共 %.2f MB，耗时 %.1f 分钟'
+          % (status, _stats['ok'], _stats['skip'], _stats['fail'],
              _stats['bytes'] / 1048576.0, (time.time() - t0) / 60.0), flush=True)
     if _failed:
         print('失败清单见 library/sheets/manifest.json 的 failed_list（可重跑补下）')
+        if not allow_fail:
+            raise SystemExit(1)
 
 
 if __name__ == '__main__':
-    if '--workers' in sys.argv:
-        WORKERS = int(sys.argv[sys.argv.index('--workers') + 1])
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--workers', type=int, default=WORKERS, help='并发下载线程数')
+    ap.add_argument('--allow-fail', action='store_true', help='有失败时仍以 0 退出')
+    args = ap.parse_args()
+    WORKERS = args.workers
+    main(allow_fail=args.allow_fail)
