@@ -171,8 +171,7 @@ public final class SheetCatalog {
      * ⚠ 三张表**必须用同一个"第一次优先"口径**（`putIfAbsent`）：同一首曲子可能
      * 出现在多个曲集里（多标签、精选集重复收录），而 `sheetByUuid` 与
      * `albumOfSheet` 是配套用的 —— 一个取曲名、一个取"所属曲集"给副标题。
-     * 曾经 si 用 putIfAbsent、sa 用 put，两边指向不同曲集，副标题里的曲集名
-     * 就跟曲名/详情页对不上了。
+     * 两边必须指向同一个曲集，否则副标题里的曲集名就跟曲名/详情页对不上了。
      */
     private static void buildIndexes(List<Category> cats) {
         Map<String, Sheet> si = new HashMap<>();
@@ -217,8 +216,8 @@ public final class SheetCatalog {
      *
      * 目录和乐谱、封面放在同一个位置（files/ 下），更新曲库只要换资源包，
      * 不用重打 APK。APK 里不再内置 catalog.json（核对：assets 只剩
-     * algo_assets / fonts / sheetShow / ui），所以早先那个 `am.open("catalog.json")`
-     * 兜底已经删掉——留着只会每次多抛一次 FileNotFoundException。
+     * algo_assets / fonts / sheetShow / ui），所以这里只从设备存储读，
+     * 不要回退到 `am.open("catalog.json")`；那只会每次多抛一次 FileNotFoundException。
      */
     private static InputStream openCatalog(Context c) {
         File f = catalogFile(c);

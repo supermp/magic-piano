@@ -7,7 +7,7 @@ App 端已经没有任何下载逻辑：曲谱只能放在
 
 用法：
 python tools/unpack_backup.py --serial <serial>  # adb 来自 local.env 或 PATH
-    python tools/unpack_backup.py --only-enc            # 只铺 sheet.xml.enc（约 4.3GB）
+    python tools/unpack_backup.py --only-enc            # 只铺 sheet.xml.enc
     python tools/unpack_backup.py --album "巴斯蒂安钢琴速成 2B级"   # 只铺某一本曲集
     python tools/unpack_backup.py --uuid <uuid> [...]   # 只铺指定乐曲
     python tools/unpack_backup.py --dry-run             # 只看会铺哪些，不真推
@@ -112,7 +112,7 @@ def fast_push(args, uuids, adb):
     """在本地把目录树搭好，然后一条 adb push 推完。
 
     逐个文件调 adb 的话，每次都要建一次连接、跑一次 sync 协议；
-    17893 个文件实测要一个多小时。改成"本地搭树 + 目录级 push"后
+    全量上万首实测要一个多小时。改成"本地搭树 + 目录级 push"后
     （adb 内部走单次 sync 会话）只要 2~3 分钟，实测 28MB/s。
     """
     # 解压暂存目录（deploy.py 在"全量模式"下会换一个，避免和"只铺 enc"的暂存混在一起）
@@ -189,7 +189,7 @@ def main():
     ap.add_argument('--adb', default=adb_path())
     ap.add_argument('--serial', default='')
     ap.add_argument('--only-enc', action='store_true',
-                    help='只铺 sheet.xml.enc（其余文件 App 用不到，可省 3.1GB）')
+                    help='只铺 sheet.xml.enc（其余文件 App 用不到，可省体积）')
     ap.add_argument('--album', help='只铺这本曲集')
     ap.add_argument('--uuid', nargs='*', help='只铺这些乐曲 uuid')
     ap.add_argument('--dry-run', action='store_true')

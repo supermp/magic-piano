@@ -3,7 +3,7 @@
 
 清单是设备侧版本判断的唯一依据：每台设备把它带一份，同步脚本读设备上的那份
 与本机这份做精确差异，就能算出「这台该补哪些、该替换哪些」，不再依赖
-cache/catalog/catalog_diff.json 的历史基线假设。
+cache/catalog/catalog_diff.json 里的基线假设。
 
 结构（短键是为了把整份清单控制在几 MB）：
   {

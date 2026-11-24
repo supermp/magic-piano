@@ -306,7 +306,7 @@ public class ImportActivity extends Activity {
                     skipped++;                              // 已有且大小、CRC 一致
                     read += size;
                     // 跳过也要刷进度：二次导入时绝大多数条目都走这一支，
-                    // 原先这里直接 continue，进度条从头到尾不动。
+                    // 不刷的话进度条从头到尾不动。
                     maybeProgress(total, read, processed, n, skipped, failed, lastPct);
                     continue;
                 }
@@ -363,8 +363,7 @@ public class ImportActivity extends Activity {
             return;
         }
         final int fn = n, fs = skipped, ff = failed;
-        // 有失败项就保留源包；全部干净才删（用户要求"装完不留 4.3GB 的包"，
-        // 但这个前提是"装完了"，不是"跑完流程了"）。
+        // 有失败项就保留源包；全部干净才删（前提是"装完了"，不是"跑完流程了"）。
         final boolean removed = ff == 0 && deleteSource();
         runOnUiThread(() -> {
             mBar.setProgress(1000);
@@ -430,7 +429,7 @@ public class ImportActivity extends Activity {
     }
 
     /**
-     * 导入成功后删掉资源包原文件（用户要求：装完就不必留 4.3GB 的包）。
+     * 导入成功后删掉资源包原文件（装完就不必再留整包）。
      *
      * 只在**成功**后调：失败/取消都保留，免得包没了又没导进去。
      * SAF 的 URI 用 DocumentsContract.deleteDocument 删（ACTION_OPEN_DOCUMENT

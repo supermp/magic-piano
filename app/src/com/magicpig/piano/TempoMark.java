@@ -20,7 +20,7 @@ final class TempoMark {
 
     /** 摘掉速度标记后的 XML（原样返回其它内容，绝不重新序列化）。 */
     final String xml;
-    /** 顶栏要显示的文字，例如 "Bouncy (♩=126)"（文字在前、速度放括号里，同旧版 UI 写法）；没有速度标记时为 null。 */
+    /** 顶栏要显示的文字，例如 "Bouncy (♩=126)"（文字在前、速度放括号里，与顶栏其它速度标记一致）；没有速度标记时为 null。 */
     final String label;
 
     private TempoMark(String xml, String label) {

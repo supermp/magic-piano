@@ -29,7 +29,7 @@ App 的升级判据是 **versionCode** —— Android 的标准做法，PackageM
     平时每次只比较当前清单与设备，不读取 diff 文件。
 
 只推变化的谱包；catalog.json / covers / 清单这几份元数据每次都推
-（合计约 12MB，比 4.4GB 谱包便宜得多，也顺带保证目录与封面一致）。
+（体积远小于整份谱包，也顺带保证目录与封面一致）。
 
 用法：
   python tools/sync_devices.py                       # 所有在线设备

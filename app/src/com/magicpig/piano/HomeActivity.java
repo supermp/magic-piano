@@ -325,9 +325,9 @@ public class HomeActivity extends Activity {
      *   左缩进 185px     -> 82.2dp（视图给 80，柔化边 1.8dp）；选中再右移 16dp
      *   首牌顶边 402px   -> 178.7dp；牌间距 44px -> 19.6dp
      *   文字墨高 43px    -> 19.1dp；原版 28sp 时我们墨高 22.7dp，故 23.5sp
-     * 注意：17dp 间距是按「曾经有 8 个导航项」时定的——42dp 牌高 + 20dp 间距会溢到
-     * 654dp、底牌被裁。「内置曲目」删掉后固定 7 项（2 个本地入口 + 5 个目录分类），
-     * 179+7*42+6*17=575dp；17dp 是既定视觉，别只为凑整再改。
+     * 注意：17dp 间距按当前固定 7 项定的——42dp 牌高 + 20dp 间距会溢到
+     * 654dp、底牌被裁。「内置曲目」不参与导航，当前是 7 项（2 个本地入口 +
+     * 5 个目录分类），179+7*42+6*17=575dp；17dp 是既定视觉，别只为凑整再改。
      */
     private void renderNav() {
         mNavBox.removeAllViews();
@@ -838,8 +838,8 @@ public class HomeActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         mSearchInput = input;
 
-        // 右侧清空按钮：空输入时隐藏（提示文字里写的「点右边的 ✕ 清空」以前并不存在，
-        // 现在补上，和文案对齐）。点它直接把输入框清空，由 TextWatcher 走正常收尾。
+        // 右侧清空按钮：空输入时隐藏，与提示文字里的「点右边的 ✕ 清空」对齐。
+        // 点它直接把输入框清空，由 TextWatcher 走正常收尾。
         final TextView clear = new TextView(this);
         clear.setText("✕");
         clear.setTextSize(TypedValue.COMPLEX_UNIT_SP, Ui.sp(this, 13f));
@@ -1222,8 +1222,8 @@ public class HomeActivity extends Activity {
         texts.addView(t);
 
         // 副标题与「最近打开」「我的收藏→乐曲」**完全一致**：
-        // 作曲家 · 曲集名，且曲集名带下划线、可点击跳转。
-        // 以前这里自己拼了一遍，而且顺序反过来（曲集名在前），曲集名也不是链接。
+        // 作曲家 · 曲集名，且曲集名带下划线、可点击跳转。不要在这里另拼一套，
+        // 否则顺序和链接行为会和其它列表页分叉。
         final int[] albumSpan = new int[2];
         TextView a = new TextView(this);
         a.setTypeface(Ui.bodyFont(this));

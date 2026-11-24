@@ -51,7 +51,7 @@ public final class LibraryStore {
     private static final String F_FAV_SHEETS = "fav_sheets.json";
     private static final String F_FAV_ALBUMS = "fav_albums.json";
 
-    /** 这两个文件名历史上改过几次，首次启动时按顺序找一遍并并进来 */
+    /** 首次启动时兼容读取这些旧文件名，并并入当前收藏集合 */
     private static final String[] OLD_FAV_SHEET_FILES =
             {"favorite_sheets.json", "favorite_songs.json"};
     private static final String[] OLD_FAV_ALBUM_FILES =
@@ -103,8 +103,8 @@ public final class LibraryStore {
     }
 
     /**
-     * 处理改过名字的存档文件。**两类收藏必须分开迁**，绝不能像上一版那样
-     * 用同一个循环，否则会把"收藏曲集"的 uuid 塞进"收藏乐曲"里。
+     * 处理旧文件名的存档文件。**两类收藏必须分开迁**，不能用同一个循环，
+     * 否则会把"收藏曲集"的 uuid 塞进"收藏乐曲"里。
      */
     private void migrateRenamedFiles() {
         // 收藏乐曲：favorite_songs.json / favorite_sheets.json → fav_sheets.json

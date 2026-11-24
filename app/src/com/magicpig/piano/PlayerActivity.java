@@ -72,11 +72,10 @@ public class PlayerActivity extends Activity {
     /** 目标行已画出、但连续几次都判"不在视口"（滚动失效）的计数 */
     private int mRestoreDrawnStuck;
     /**
-     * 恢复等待的**总**上限。原来是 90 秒（"兜底，正常走不到"），但那正是用户报
-     * "卡在正在准备第 x/y 小节上不动、不点取消就一直等"的来源 —— 手机上长曲
-     * （384 小节）逐行渲染本来就要几十秒，90 秒内卡片会一直停在某个数字上。
-     * 现在有更聪明的三条提前退出（见 {@link #mRestorePollRun}：目标上屏 /
-     * 目标已画但滚动失效 / 渲染停滞），这个上限只是最后的硬保底。
+     * 恢复等待的**总**上限。只靠固定 90 秒兜底，会让卡片停在"正在准备第 x/y 小节"
+     * 上不动、不点取消就一直等：手机上长曲（384 小节）逐行渲染本来就要几十秒。
+     * 三条提前退出（见 {@link #mRestorePollRun}：目标上屏 / 目标已画但滚动失效 /
+     * 渲染停滞）优先，这个上限只是最后的硬保底。
      */
     private static final long RESTORE_POLL_MAX_MS = 25000;
     /**
@@ -463,8 +462,8 @@ public class PlayerActivity extends Activity {
         //
         // 圆环 24dp 这次放得下：它夹的是两行（曲名 ~53px + 速度 ~29px ≈ 82px），
         // 行高 = max(82, 24dp=84px) ≈ 84px，仍压在右侧圆钮列的 87px 以内。
-        // ⚠ 上一版只夹"标题"一行时，24dp 会把顶栏顶高 30px，所以才缩到 16dp；
-        //   结构变了尺寸才能回 24 —— 两个数是一对，别单独改。
+        // ⚠ 24dp 是按夹两行定的；只夹"标题"一行时会把顶栏顶高 30px，那种
+        //   结构下必须缩到 16dp —— 尺寸和夹的内容是一对，别单独改。
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.setGravity(Gravity.START);
@@ -544,10 +543,8 @@ public class PlayerActivity extends Activity {
         //   · 不弹窗就不会遮住谱面，播放中切换观感更顺。
         // 图标用原 APK 的 icon_advanced_*_hand 合成（与收藏/试听同款 84×84 棕圆）。
         // 右侧一排圆钮从左到右：手型 → 演奏 → 试听 → 收藏。
-        // 收藏原来夹在演奏和试听之间，现按你的要求挪到最右（试听后面）。
-        // 顺带把间距统一成相邻两个之间 16dp：原先收藏不带边距、试听用
-        // leftMargin 20dp，直接换序会变成收藏紧贴试听；最右由 top 的
-        // paddingRight 26dp 收边。
+        // 相邻两个统一 16dp 间距（手型按钮单独 12dp + 顶部 padding 收边），
+        // 收藏固定在最右，最右由 top 的 paddingRight 26dp 收边。
         mHandBtn = Ui.circleButton(this, "合手", "ic_hand_both.png");
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -737,11 +734,10 @@ public class PlayerActivity extends Activity {
         });
         // 谱面铺满整块可视区（不做任何裁切）。
         //
-        // 曾经试过"缩短 WebView（bottomMargin 92dp）让一屏只放两行"，第三行确实
-        // 不露头了，但代价是**第二行自己被切掉半行**（低音谱表只剩上半截），
-        // 比露出第三行还难看 —— 用户明确要求回退。渲染器本身没有"每页行数"
-        // 这个参数（它按 window.innerHeight 自己排），所以这里维持满高：
-        // 宁可底部露出下一行的半截，也不裁掉当前行的内容。
+        // WebView 保持满高：缩短高度（如 bottomMargin 92dp）会让第二行被切掉半行
+        // （低音谱表只剩上半截），比底部露出第三行还难看。渲染器本身没有"每页行数"
+        // 参数（它按 window.innerHeight 自己排），所以这里宁可露出下一行半截，
+        // 也不裁掉当前行内容。
         root.addView(mSheet, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -886,8 +882,8 @@ public class PlayerActivity extends Activity {
 
     /**
      * 居中的加载卡片：金色转圈（+ 一行进度文案，由 {@link #setWaitText} 填）。
-     * 反色款，与 Ui.toast 同一套配色。文案在一开始是空的 —— 那时连小节数都没有，
-     * 写什么都不对（见 updateWaitText 的说明）。
+     * 反色款，与 Ui.toast 同一套配色。文案在初始化阶段是空的 —— 此时连小节数
+     * 都没有，写什么都不对（见 updateWaitText 的说明）。
      */
     private View buildLoading() {
         LinearLayout box = new LinearLayout(this);
@@ -897,8 +893,7 @@ public class PlayerActivity extends Activity {
         box.setPadding(Ui.floatDp(this, 20), Ui.floatDp(this, 18),
                 Ui.floatDp(this, 20), Ui.floatDp(this, 16));
 
-        // 反色浮层：半透明棕底 + 金边 + 奶油字。
-        // 原来是浅奶油底 + 棕细边 + 灰字，跟浅色谱面几乎同色、浮层感不强。
+        // 反色浮层：半透明棕底 + 金边 + 奶油字，在浅色谱面上有明确的浮层感。
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Ui.FLOAT_BG);
         bg.setCornerRadius(Ui.floatDp(this, 24));
@@ -909,7 +904,7 @@ public class PlayerActivity extends Activity {
         android.widget.ProgressBar bar = new android.widget.ProgressBar(this);
         bar.setIndeterminate(true);
         android.graphics.drawable.Drawable d = bar.getIndeterminateDrawable();
-        // 深棕底上原来的棕色转圈会糊成一片，改成金色（呼应金边 / 奶油字）
+        // 深棕底上用金色转圈，与金边 / 奶油字呼应；棕色会糊成一片
         if (d != null) d.setColorFilter(Ui.GOLD_LIGHT, android.graphics.PorterDuff.Mode.SRC_IN);
         box.addView(bar, new LinearLayout.LayoutParams(
                 Ui.floatDp(this, 32), Ui.floatDp(this, 32)));
@@ -1048,8 +1043,8 @@ public class PlayerActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         // 反色浮层：与 Ui.toast / buildLoading / 恢复询问条同一套底色、金边、圆角。
-        // 收紧留白（24/20 → 20/18）：去掉「关闭」后卡片只剩两颗按钮
-        // 原来为三颗按钮留的宽度就用不上了。
+        // 收紧留白（24/20 → 20/18）：卡片只剩两颗按钮，
+        // 不需要为三颗按钮留宽度。
         box.setPadding(Ui.floatDp(this, 20), Ui.floatDp(this, 18),
                 Ui.floatDp(this, 20), Ui.floatDp(this, 18));
         GradientDrawable bg = new GradientDrawable();
@@ -1124,8 +1119,8 @@ public class PlayerActivity extends Activity {
         // 两套按钮，互斥显示（结算期两套都隐藏）：
         //   · 成绩卡（有正常演奏推进）→ 一行两按钮：主按钮 + 下一曲
         //   · 错误卡（演奏中断）      → 单个「知道了」：
-        // 去掉原来的「关闭」——出分后点卡片外区域或按 BACK 都能收起
-        // 没必要为纯关闭再占 1/3 行宽；卡片也相应收窄、留白收紧。
+        // 不设「关闭」——出分后点卡片外区域或按 BACK 都能收起
+        // 没必要为纯关闭再占 1/3 行宽；卡片相应收窄、留白收紧。
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.CENTER_VERTICAL);
@@ -1177,9 +1172,8 @@ public class PlayerActivity extends Activity {
         if (dlg.getWindow() != null) {
             dlg.getWindow().setBackgroundDrawable(
                     new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-            // 以前三颗按钮要 480dp 才放得下四字标签；去掉「关闭」后只剩两颗，
-            // 400dp 足够（分项行「音准 100 · 节奏 100 · 速度 100」实测约 264dp，
-            // 卡片内宽 400-40=360dp 也不会折行），卡片不再占大半屏。
+            // 卡片只保留两颗按钮，400dp 足够（分项行「音准 100 · 节奏 100 · 速度 100」
+            // 实测约 264dp，卡片内宽 400-40=360dp 不会折行），不再占大半屏。
             // 仍留窄屏兜底：min(400dp, 屏宽-24dp)。
             int w = Math.min(Ui.floatDp(this, 400),
                     getResources().getDisplayMetrics().widthPixels - Ui.floatDp(this, 24));
@@ -1244,9 +1238,8 @@ public class PlayerActivity extends Activity {
      * **唯一的退出入口**：顶栏箭头与系统返回键都走这里。
      *
      * 三道闸按顺序：结算中直接拒 → 演奏中要二次确认 → 才真的 finish。
-     * 以前箭头和系统返回各写一份（`finish()` vs `super.onBackPressed()`），
-     * 两边的拦截条件得手动保持同步，改一处漏一处就会出现"箭头顶得住、
-     * 返回键顶不住"。
+     * 箭头和系统返回必须共用这一个入口：两边各写一份拦截条件，改一处漏一处
+     * 就会出现"箭头顶得住、返回键顶不住"。
      */
     private void leavePage() {
         if (mTrialSettling) {
@@ -1282,7 +1275,7 @@ public class PlayerActivity extends Activity {
             return true;
         }
         mBackConfirmAt = now;
-        // 文案带上时限：原来只说"再按一次退出"，用户以为随时都行，实际窗口只有 2 秒
+        // 文案带上时限：窗口只有 3 秒，不说清楚用户以为随时都行。
         toast("演奏中，3 秒内再按一次退出");
         Log.i(TAG, "演奏中第一次返回：只提示，不退出");
         return false;
@@ -1503,7 +1496,7 @@ public class PlayerActivity extends Activity {
      * 把光标、播放头、进度条滑块和球上数字一次性摆到同一位置。
      *
      * 选段生效 / 恢复存档选段这类路径是**直接改播放头**、不经过 ticker，
-     * 以前只调 setMeasureStatus 更新了文字/数字，mSeek 还停在旧位置。
+     * 只调 setMeasureStatus 更新文字/数字会留下 mSeek 停在旧位置。
      */
     private void placeCursorAt(int measure, int voice, int offset, boolean followScroll) {
         // 用户主动定位（载入存档 / 点谱面 / 拖进度条 / 播放跟随）：解除曲首光标的
@@ -1536,8 +1529,8 @@ public class PlayerActivity extends Activity {
             return;
         }
         // 「更早」= 小节更小；同小节内**按拍位 offset 比**，offset 相同再比声部。
-        // 原来的顺序是先比 voice：起点在右手第 3 拍、点左手第 1 拍时，v=4 > 0 被判成
-        // "更晚"，实际它在小节开头 —— 这就是用户反馈的"终点能选到起点前面去"。
+        // 比较顺序必须小节 → offset → voice：先比 voice 会把右手第 3 拍的起点、
+        // 左手第 1 拍的终点判成"更晚"，实际终点在小节开头。
         // offset 才是时间轴（拍内第几个音），voice 只决定同一拍内上下的先后。
         boolean before = m < mSecStartM
                 || (m == mSecStartM && (o < mSecStartO
@@ -1562,7 +1555,7 @@ public class PlayerActivity extends Activity {
         // 选完先把光标（播放头）收到左界 —— 选段的"默认起点"就是段首；
         // 之后光标可以在段内自由移动，下次试听/演奏从光标所在处开始。
         placeCursorAt(mSecStartM, mSecStartV, mSecStartO, true);
-        // 恢复「选段完成」提示：上一次是「再选一个音符
+        // 恢复「选段完成」提示：上一句是「再选一个音符
         // 作为终点」，如果手快，那句还没消失就变成了选段生效，容易被误读成"还要再点"。
         // 同一位置换一句话说清楚"这一步结束了"，比只靠括号+按钮变化可靠。
         toast("选段完成");
@@ -1746,10 +1739,10 @@ public class PlayerActivity extends Activity {
     /**
      * 光标 / 播放头 / 进度条 / 状态行 / 视口一起摆回起点。
      *
-     * 试听自然结束（{@link #finishPreviewAtStart()}）与演奏自然结束必须**同一套口径**
-     * —— 两处原来各抄了一份 20 行的同样代码，改一处漏一处就会"试听回曲首、演奏停在末小节"。
+     * 试听自然结束（{@link #finishPreviewAtStart()}）与演奏自然结束必须**同一套口径**；
+     * 两处各写一份，改一处漏一处就会"试听回曲首、演奏停在末小节"。
      *
-     * @param forceViewport 是否再补一次 moveToStart（演奏路径需要：setMagicMode(false)
+     * @param forceViewport 是否再补一次 moveToStart（演奏路径需要：setPerformMode(false)
      *                      之后的补画光标是异步排队的，updateProgress 那次滚动可能被它盖掉）
      */
     private void rewindToStart(int m, int v, int o, boolean forceViewport) {
@@ -1771,8 +1764,8 @@ public class PlayerActivity extends Activity {
      * ① 一个音都没收到 —— 沿用按停时的输入峰值口径 {@code peak < 300}；
      * ② 收到了声音，但光标从头到尾没离开过起点（一直落在第一个音上，比如一直在
      *    弹错音 / 环境噪声让峰值不为 0 却没推进任何进度）。
-     * 命中任一条就**直接退出演奏状态、不弹任何结果窗口**（原来的「未演奏」卡片
-     * 分数是 0、没有判定数据，报出来只会误导，用户也不要这个提示）。
+     * 命中任一条就**直接退出演奏状态、不弹任何结果窗口**：分数为 0、没有判定数据，
+     * 报出来只会误导。
      * ⚠ 别用光标帧数判：弹错音时引擎不推进光标但仍报帧，那正是②要抓的情况。
      */
     private boolean trialHadNoPlay() {
@@ -1789,9 +1782,9 @@ public class PlayerActivity extends Activity {
     private void toggleTrial() {
         if (mTrialRunning) {
             if (!mUfpRunning) {
-                // 会话还在建（T618 冷启 2~4 秒）：这一下是**取消**，不是按停。
-                // 以前按钮在这段时间是禁用的，点按被直接吞掉 —— 用户看到的是
-                // "点了没反应，几秒后反而开始演奏"，再按停又要等 ufpFinish。
+                // 会话还在建（冷启 2~4 秒）：这一下是**取消**，不是按停。
+                // 按钮在这些时间必须可点：禁用的表现是"点了没反应，几秒后反而
+                // 开始演奏"，再按停又要等 ufpFinish。
                 cancelBuildingTrial();
                 return;
             }
@@ -1807,9 +1800,8 @@ public class PlayerActivity extends Activity {
                         + "，没演奏=" + noPlay);
                 if (!noPlay) {
                     // 收尾要算评分，得好几秒（native ufpFinish）。这段时间必须让用户
-                    // 看得出"已经在结算"：立刻置灰按钮 + 弹结算卡。原来只置了
-                    // mUfpRunning，按钮照样能点、界面毫无反馈 —— 用户以为没反应，
-                    // 反复点，状态更乱。
+                    // 看得出"已经在结算"：立刻置灰按钮 + 弹结算卡。只置 mUfpRunning、
+                    // 不置灰按钮，按钮照样能点、界面毫无反馈，用户会反复点。
                     markSettling();
                 }
                 // ⚠ 必须丢到后台线程：stop() 里要 join 喂音线程（最多 800ms）
@@ -1874,8 +1866,8 @@ public class PlayerActivity extends Activity {
         }
         // 进演奏态：只置 Java 侧标志（演奏态的小节高亮 + 引擎报文门控），
         // 渲染器不切模式、不重绘（见 SheetView.mPerformMode）。
-        // ⚠ 光标不再跟着切样式了：现在只有金胶囊一套（见 SheetView.applyCursorStyle）。
-        mSheet.setMagicMode(true);
+        // ⚠ 光标只有金胶囊一套，不随模式切样式（见 SheetView.applyCursorStyle）。
+        mSheet.setPerformMode(true);
         // 不写状态行：准备期间状态行停在上一次的小节数上即可，
         // 按钮已经变成「演奏中」说明点到了
         mTrialBtn.setState("ic_sheet_preview_stop.png", "演奏中");
@@ -1915,8 +1907,8 @@ public class PlayerActivity extends Activity {
         // ⚠ 这一帧必须 forceScroll=true：试听起播靠
         // mPreviewScrollPending + updateProgress 发一帧 forceScroll=true 的
         // moveCursor，把光标所在小节顶到视口顶部 —— 用户把光标停在"只露半截"
-        // 的位置时，试听会把整行补齐。演奏侧原本全是 forceScroll=false，又刚
-        // 碰过谱面落进 H5 的 2 秒触摸抑制窗口，于是这一行永远补不齐。
+        // 的位置时，试听会把整行补齐。演奏侧若全用 forceScroll=false，又刚
+        // 碰过谱面落进 H5 的 2 秒触摸抑制窗口，这一行就永远补不齐。
         // 这里对齐试听：起播强制跟一次，之后演奏中仍按老规矩不抢视口。
         mUi.postDelayed(() -> {
             if (uiGone() || !mTrialRunning) return;
@@ -1942,16 +1934,14 @@ public class PlayerActivity extends Activity {
                 try {
                 // 练习起点 = 屏幕上那颗光标（外层算好的 bm/bo/bv）。用户先点谱面/
                 // 拖进度条定位，再点演奏，就只练这一小段（练琴最常见的用法）。
-                // 以前在这里重取 headMeasure()，跨越建会话的几秒会和 UI 上摆好的
-                // 起点不一致 —— 现在整次演奏统一用同一个起点。
+                // 整次演奏统一用这个起点，不要在引擎线程重取 headMeasure()：
+                // 建会话要几秒，重取会和 UI 上摆好的起点不一致。
 
-                // 自喂音频的合成在 UfpTrial 内部做（必须在 releasePreviewModule 之前），
-                // 这里原来还算了一份 blocks，纯属 magicPiano 时代的残留 —— 等于把整曲
-                // 合成两遍，白等好几秒，已删除。
+                // 自喂音频的合成只在 UfpTrial 内部做（必须在 releasePreviewModule 之前），
+                // 这里不要再算一份 blocks，否则整曲要合成两遍、白等好几秒。
 
-                // 演奏走 UFP —— 原版 App 用的那条通路：真实的音高/节奏判定 +
-                // native 算的 rating（magicPiano 已整体移除：它不校验真实音高，
-                // 弹错也报 fully matched）。
+                // 演奏走 UFP：真实的音高/节奏判定 + native 算的 rating。
+                // 这是唯一演奏通路，不要再接回不校验真实音高的通路。
                 boolean self = getIntent().getBooleanExtra("selffeed", false);
                 boolean quiet = getIntent().getBooleanExtra("feedsilence", false);
                 // 终点必须是**越过最后一小节**的那个"小节号"：实测终点是按位置生效的
@@ -1959,12 +1949,11 @@ public class PlayerActivity extends Activity {
                 // 而越界一格会被引擎夹成整曲 —— 正是我们要的"到曲末"。
                 int lastM = Math.max(bm + 1, AlgoEngine.get().getMeasureCount());
                 if (mSecOn && mSecEndM >= 0) {
-                    // ⚠ 旧注释说"带 offset 的终点会被忽略、只认小节边界"是 **magicPiano 时代**
-                    //   的结论，UFP 并不成立：实测 end=[{measure:5,voice:0,offset:2}]
-                    //   `ufpSetCustomRangeWithResult` 直接返回 0 并精确停在该音符。
-                    // 以前一律放宽一小节（mSecEndM+1）→ 越界 → 退回段尾小节 offset 0，
-                    // 结果段尾小节被整段判进去，用户看到的正是"段落右边不在小节结尾也会播完那小节"。
-                    // 现在直接把选段的**精确终点音符**交给 native，与试听 setSection 对齐。
+                    // UFP 认带 offset 的终点：实测 end=[{measure:5,voice:0,offset:2}]
+                    // `ufpSetCustomRangeWithResult` 直接返回 0 并精确停在该音符。
+                    // 不要放宽到 mSecEndM+1：越界会退回段尾小节 offset 0，
+                    // 把段尾整小节判进去，用户会看到"段落右边不在小节结尾也播完那小节"。
+                    // 这里直接把选段的**精确终点音符**交给 native，与试听 setSection 对齐。
                     Log.i(TAG, "演奏区间 = 精确终点 " + mSecEndM + "/" + mSecEndV
                             + "/" + mSecEndO + "（起点 " + bm + "/" + bv + "/" + bo + "）");
                 }
@@ -2030,7 +2019,7 @@ public class PlayerActivity extends Activity {
                         mTrialBtn.setState("ic_sheet_trial.png", "演奏");
                         mTrialBtn.setUiEnabled(true);
                         setTrialUi(false);
-                        mSheet.setMagicMode(false);
+                        mSheet.setPerformMode(false);
                         // 用户在建会话期间主动取消：UI 已经复位过了，别再报错
                         if (!mTrialCanceled) {
                             Ui.toast(PlayerActivity.this, "这首曲子暂时开不了演奏");
@@ -2070,9 +2059,9 @@ public class PlayerActivity extends Activity {
             mTrialBtn.setState("ic_sheet_trial.png", "演奏");
             mTrialBtn.setUiEnabled(true);
             setTrialUi(false);
-            mSheet.setMagicMode(false);
+            mSheet.setPerformMode(false);
             // 不再 hidePreviewCursor：光标只有胶囊这一套，演奏结束照旧显示它
-            //（setMagicMode(false) 里会立刻把胶囊按最后位置画回来）。
+            //（setPerformMode(false) 里会立刻把胶囊按最后位置画回来）。
         }
         updateTransportState();
     }
@@ -2241,8 +2230,8 @@ public class PlayerActivity extends Activity {
         // 试听是开始/停止二态按钮：试听中必须保持可点，只有演奏及其结算才禁用。
         mPlayBtn.setUiEnabled(!mTrialRunning && !mTrialSettling && !sectionLock);
         // ⚠ 选段中**不能**灰「选段」按钮：它此时显示「选段中」，并且是"取消选段"
-        // 的唯一入口（点击走 cancelSection）。原来 busy 把 sectionLock 也算进去，
-        // 于是选段到一半按钮自己灰掉、退不出来。
+        // 的唯一入口（点击走 cancelSection）。busy 不能把 sectionLock 算进去，
+        // 否则选段到一半按钮自己灰掉、退不出来。
         final boolean sectionBusy = mTrialRunning || mTrialSettling || preview;
         if (mSectionBtn != null) mSectionBtn.setUiEnabled(!sectionBusy);
         // 手型：只有演奏及其结算不能切（UFP 会话建好时手型就固定了）
@@ -2333,7 +2322,7 @@ public class PlayerActivity extends Activity {
             // 回来时按预览态继续（只动 Java 侧，不发报文、不重绘）。
             // 光标只有胶囊一套，不用再额外"藏胶囊"。
             if (wasTrial && !isFinishing()) {
-                mSheet.setMagicMode(false);
+                mSheet.setPerformMode(false);
             }
         }
         if (wasTrial || UfpTrial.isRunning()) {
@@ -2407,7 +2396,7 @@ public class PlayerActivity extends Activity {
             if (uiGone() || mSheet == null) return;
             // 延迟期间用户可能已经点了演奏或试听：别让浮层盖在他正在做的事上，
             // 这次跳过（按停 / 起播失败时还会再调本方法补一次机会）。
-            // ⚠ 绝不能在这里把 mCursorRestored 置位 —— 原来在方法开头就置位，
+            // ⚠ 绝不能在这里把 mCursorRestored 置位 —— 在方法开头就置位，
             // 会让"首屏后提前点试听"把上次的存档机会永久丢掉。
             if (mTrialRunning || mPreviewActive || mSecPicking) return;
             showRestorePrompt();
@@ -2455,11 +2444,9 @@ public class PlayerActivity extends Activity {
         row.setGravity(Gravity.CENTER);
 
         // 两颗都走 Ui.floatButton 的**紧凑档**：主/次同款圆角、金边、按下态。
-        // 原来「恢复」是 15dp 金药丸 + 无边框 + titleFont，「不用」是纯文字 +
-        // bodyFont，同一行里不像一对；随后又发现统一成
-        // 成绩卡那档（21sp/56dp）后按钮比 21sp 的问句还大，整条像"大按钮卡片"
-        // —— 见 Ui.floatButton 的两档说明。
-        // 紧凑档：整条只有一行问句（21sp），按钮用 18sp/48dp 才不成"大按钮卡片"
+        // 统一成成绩卡那档（21sp/56dp）会让按钮比 21sp 的问句还大，整条像
+        // "大按钮卡片"；紧凑档（18sp/48dp）才与问句相称。
+        // 详见 Ui.floatButton 的两档说明。
         TextView yes = Ui.floatButton(this, "恢复", true, Ui.SIZE_COMPACT);
         yes.setOnClickListener(v -> finishRestore(true));
         LinearLayout.LayoutParams ylp = new LinearLayout.LayoutParams(
@@ -2500,7 +2487,7 @@ public class PlayerActivity extends Activity {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
-        // 宽度按内容收窄（原来写死 470dp，对这么短一句话太长），整条因此只有
+        // 宽度按内容收窄，不写死固定宽度；整条因此只有
         // 文字 + 两个按钮那么宽；按钮宽度已定死，倒计时变化不会再改总宽。
         int hpx = getResources().getDisplayMetrics().heightPixels;
         // 与 Ui.toast 同一视线：共用 TOAST_BOTTOM_RATIO
@@ -2553,8 +2540,8 @@ public class PlayerActivity extends Activity {
                 beginRestoring();
                 if (!restoreSection(mResumeSection, mResumeCursor)) {
                     // 存档里的选段已失效，但**光标位置通常仍然有效**：别把用户丢回曲首。
-                    // 原来 restoreSection 直接 return，随后 markRestoreTargetAndPoll()
-                    // 拿不到 lastMeasure/mSecStartM，把目标退化成 {0,0,0} ——
+                    // restoreSection 直接 return 的话，随后 markRestoreTargetAndPoll()
+                    // 拿不到 lastMeasure/mSecStartM，会把目标退化成 {0,0,0} ——
                     // 用户点「恢复」只回到第 1 小节，白丢进度。
                     if (mResumeCursor != null) {
                         int[] c = mResumeCursor;
@@ -2744,8 +2731,8 @@ public class PlayerActivity extends Activity {
     /**
      * 恢复等待的独立看门狗：只兜"轮询链断了"。
      *
-     * 恢复锁原本只有轮询一条路能解；轮询要是被某条异常路径摘掉（或 Handler 消息
-     * 被误清），卡片就永久挂着 —— 用户报"卡在正在准备第 x/y 小节上不动，不点取消
+     * 恢复锁如果只由轮询一条路来解；轮询要是被某条异常路径摘掉（或 Handler 消息
+     * 被误清），卡片就永久挂着 —— 表现为"卡在正在准备第 x/y 小节上不动，不点取消
      * 就一直等"。这个任务由 {@link #beginRestoring()} 单独 post，不参与轮询链，
      * 到点无条件收尾（光标仍会摆到目标小节）。
      */
@@ -2815,9 +2802,9 @@ public class PlayerActivity extends Activity {
                 }
                 // 跳转真的发生了：最后原地重画一次（纠正重排位移并滚回目标），
                 // 然后**立刻解锁** —— 用户的要求是"卡片消失=马上能用"。
-                // 不再等跳转后的"画面安静"：下方未画的行是往下追加，不会移动
+                // 不等跳转后的"画面安静"：下方未画的行是往下追加，不会移动
                 // 已经画好的行，光标位置不会漂；判稳兜底（mForcePlaceRun）保留，
-                // 只负责它原本的"重画"，不再承担解锁。
+                // 只负责重画，不承担解锁。
                 Log.i(TAG, "恢复目标（第 " + AlgoEngine.get().measureNumber(mRestoreTarget[0]) + " 小节）已滚到屏幕内，解锁");
                 mJumpConfirmed = true;
                 mUi.removeCallbacks(mRestorePollRun);
@@ -3087,7 +3074,7 @@ public class PlayerActivity extends Activity {
      *
      * ⚠ 载入存档到很后面时最容易踩：seekToNote 把光标画到第 353 小节，
      * 但那时长曲子还在逐行绘制，后续批次会把光标擦掉 —— 用户看到的正是
-     * "到目标位置闪一下就没了"。以前只给曲首路径加了锁。
+     * "到目标位置闪一下就没了"。曲首、载入存档、恢复选段都必须走这把锁。
      */
     private void keepCursorAlive() {
         if (mSheet == null) return;
@@ -3146,9 +3133,8 @@ public class PlayerActivity extends Activity {
             try {
                 // ⚠ 这里**永远不滚视口**：恢复目标在解锁那一刻
                 // 已经由 mRestorePollRun 的 placeCursorAt(..., true) 滚到位，整页画完
-                // 再滚一次是历史遗留（加"目标上屏才解锁"的轮询之前，渲染器会在逐行
-                // 绘制时把视口拉走）。实测第 303 / 384 小节不滚也稳定；留着它反而会
-                // 在用户自己滚过谱面后把视口抢回去。只重画光标（带 wb_no_scroll）。
+                // 再滚一次会把用户自己滚过的谱面抢回去。只重画光标（带 wb_no_scroll）。
+                // 实测第 303 / 384 小节不滚也稳定。
                 placeCursorAt(m, mSheet.lastVoice(), mSheet.lastOffset(), false);
             } finally {
                 mPlacingStart = false;
@@ -3220,7 +3206,7 @@ public class PlayerActivity extends Activity {
      * 下次试听/演奏就从移动到的那个音符起。
      *
      * @return 选段是否真的恢复了。false = 存档里的选段越界/反序（典型：曲库更新后
-     *         这首曲子变短了 / 旧版本写坏了），**此时一个字段都没改** ——
+     *         这首曲子变短了 / 旧存档写坏了），**此时一个字段都没改** ——
      *         调用方必须自己决定拿什么兜底（见 finishRestore：退回存档光标）。
      */
     private boolean restoreSection(int[] s, int[] cursor) {
@@ -3339,7 +3325,7 @@ public class PlayerActivity extends Activity {
      * 引擎/喂音线程的回调比 Activity 活得久：用户按返回、或 System 回收页面之后，
      * UfpTrial 仍会回调 onCursor/onFinished。这些回调都在 runOnUiThread 里，
      * 里面直接摸 mSheet 就是 NPE（实测崩溃栈：
-     *   NullPointerException ... SheetView.setMagicMode(boolean) on null reference
+     *   NullPointerException ... SheetView.setPerformMode(boolean) on null reference
      *   at PlayerActivity$3.lambda$onFinished）。所有 UI 回调入口先过这一关。
      */
     private boolean uiGone() {
@@ -3349,8 +3335,7 @@ public class PlayerActivity extends Activity {
     private final TrialListener mTrialListener = new TrialListener() {
         @Override
         public void onLocked() {
-            // 引擎第一次真正跟上弹奏。以前这里会往状态行写一句"弹到哪儿光标走到哪儿"
-            // 的说明，现在状态行只报小节，什么也不用写。
+            // 引擎第一次真正跟上弹奏。状态行只报小节，这里不需要额外说明文案。
         }
 
         @Override
@@ -3384,9 +3369,9 @@ public class PlayerActivity extends Activity {
             if (!startAtScoreHead && m == 0 && offset == 0 && voice == 0) {
                 return;
             }
-            // 原来写的是「m < 起点一律忽略」，但手动停止后起点停在中段，
-            // 再点演奏从曲首弹时，要一路弹到那个位置光标才肯动 —— 用户看到的
-            // 就是"隔很久才继续推进"。
+            // 不能只写「m < 起点一律忽略」：手动停止后起点停在中段，
+            // 再点演奏从曲首弹时，要一路弹到那个位置光标才肯动 —— 表现就是
+            // "隔很久才继续推进"。
             // 引擎刚建会话、还没听到音时也会一路报 (0,0,0)（位置未知），
             // 这种空闲误报同样只挡开跑后的短暂窗口。窗口之后一律跟随真实报告，
             // 哪怕报的位置在起点之前（那正是用户从头弹的情况）。
@@ -3414,7 +3399,7 @@ public class PlayerActivity extends Activity {
 
         /**
          * 把最新一次 onCursor 的位置画到谱面上。
-         * 与原来的内联 lambda 等价，只是改成"取最新值"，不再逐帧排队。
+         * 只画最新值，不逐帧排队。
          */
         private void flushCursor() {
             // 先清标志、再取最新值：这两步之间若来了新位置，会重新排一次任务，
@@ -3503,7 +3488,7 @@ public class PlayerActivity extends Activity {
                 mTrialBtn.setUiEnabled(true);
                 setTrialUi(false);
                 // 退出演奏态（小节高亮 / 报文门控），光标始终是同一枚金色胶囊
-                mSheet.setMagicMode(false);
+                mSheet.setPerformMode(false);
                 // 把演奏时的整小节高亮撤掉（否则白块会停在最后一小节上）
                 mSheet.clearMeasureHighlight();
                 // 需求：没收到任何钢琴声音，或收到了但光标一直落在
@@ -3576,7 +3561,7 @@ public class PlayerActivity extends Activity {
                 mTrialBtn.setState("ic_sheet_trial.png", "演奏");
                 mTrialBtn.setUiEnabled(true);
                 setTrialUi(false);
-                mSheet.setMagicMode(false);
+                mSheet.setPerformMode(false);
                 mSheet.clearMeasureHighlight();
                 syncHeadToCursor();
                 setMeasureStatus(mCurMeasure);
@@ -3588,11 +3573,10 @@ public class PlayerActivity extends Activity {
     };
 
     /**
-     * 结束时卡的标题，只留两句：
+     * 结束时卡的标题只留两句：
      *   自己按停 → 「演奏中止」，不评价弹得怎么样，但把当时的分数报出来
      *   弹到曲末 → 「演奏完成」
-     * 原来还多一句「演奏结束」专给"没跟上"，和「完成」「中止」「中断」挤成四个
-     * 近义词，而且它其实是在说没弹成，措辞反而更含糊，已删。
+     * 不再加「演奏结束」这类近义词：它其实是在说没弹成，措辞反而更含糊。
      */
     private static String trialTitle(boolean userStopped) {
         return userStopped ? "演奏中止" : "演奏完成";
@@ -3623,9 +3607,9 @@ public class PlayerActivity extends Activity {
      *
      * retcode != 0 表示引擎全程没进入正常跟随，errinfo 是引擎内部状态机的原话
      * （典型 "Still in the state of GENESIS 未进入正常跟随"），只有排查价值，
-     * 只进 logcat。界面上统一给一句中性短说明；原来的「这次没听到你的弹奏」
-     * 「这次没能跟上你的弹奏」是否定式评价，且 现在「没演奏」已静默
-     * 退出、根本不弹卡，属于残留文案，一并收敛。
+     * 只进 logcat。界面上统一给一句中性短说明；不要用「这次没听到你的弹奏」
+     * 「这次没能跟上你的弹奏」这类否定式评价。现在「没演奏」已静默
+     * 退出、根本不弹卡。
      */
     private static String evalNote(String evaJson) {
         if (evaJson == null) return "";
@@ -3765,7 +3749,7 @@ public class PlayerActivity extends Activity {
         // 没在播：纯跳转，不发出声音。光标挪过去 + 状态行显示新小节就够了，
         // 不要再补一句"已定位到第 X 小节"——眼睛看得到的事不用文字复述。
         // ⚠ 必须走 placeCursorAt（参数顺序 measure, voice, offset）：它带"用户主动
-        // 定位"的解锁逻辑（清曲首光标锁 / 取消判稳重画）。原来直接 updateProgress，
+        // 定位"的解锁逻辑（清曲首光标锁 / 取消判稳重画）。直接 updateProgress 的话，
         // 曲首光标的锁和 mPlaceAtStartPending 都留着，8~22 秒后判稳回调还会再重画
         // 一次并且 followScroll=true —— 用户点完谱面，过一会儿视口又自己跳一下。
         // 取消跳转要回到发起前的位置：placeCursorAt 会覆盖 lastMeasure/lastVoice/lastOffset，
@@ -3979,8 +3963,8 @@ public class PlayerActivity extends Activity {
             mPlayPosVisible = true;
         } else {
             // 位置暂时在视口外：**光标照常更新，只是不滚屏**。
-            // 以前这里什么都不做，要等 3 秒才会再动一次 —— 表现就是
-            // "光标卡在一个音符上，过一会儿一下子跳过好几个音"。
+            // 不更新的话，要等 3 秒才会再动一次 —— 表现就是"光标卡在一个音符上，
+            // 过一会儿一下子跳过好几个音"。
             mSheet.moveCursor(measure, offset, voice, false);
         }
     }
@@ -3991,7 +3975,7 @@ public class PlayerActivity extends Activity {
 
     /**
      * 演奏中**最新**待画的光标位置（measure/offset/voice）。
-     * 低端机上 UI 线程 / WebView 跟不上 46ms 一次的回调时，原来每个回调都往 UI
+     * 低端机上 UI 线程 / WebView 跟不上 46ms 一次的回调时，每个回调都往 UI
      * 队列塞一个 runOnUiThread，队列越排越长 → 光标落后实际弹奏越来越多。
      * 这里只保留最新一帧，UI 忙完取一次就跳到当前位置。
      */
@@ -4070,7 +4054,7 @@ public class PlayerActivity extends Activity {
                 // 有一边一个音都没有，这首就属于"不可分合/左/右手"。
                 //
                 // ⚠ 只扫一遍：这首 XML 大曲子能到 1~2MB，而 handNoteCounts 是
-                // 纯字符串扫描。原来 canSplitHands() 和 handNoteStats() 各调一次，
+                // 纯字符串扫描。canSplitHands() 和 handNoteStats() 各调一次，
                 // 等于在首屏上屏的临界路径上把整份谱扫两遍（还各拿一次 getSheetXml）。
                 final String xml = AlgoEngine.get().getSheetXml();
                 final int[] hands = handNoteCounts(xml);
@@ -4378,7 +4362,7 @@ public class PlayerActivity extends Activity {
      *
      * 一次 `albumOfSheet` 同时给出两个值：`updateTransportState()` 被
      * setTrialUi / setPlaybackUi / markSettling / setMeasureStatus 等高频路径调用，
-     * 原先"取下标查一次、取总数又查一次"，等于把 776 个曲集的索引扫两遍。
+     * 分开"取下标查一次、取总数又查一次"等于把曲集索引扫两遍。
      */
     private void albumPosition(int[] out) {
         out[0] = -1;
@@ -4413,7 +4397,7 @@ public class PlayerActivity extends Activity {
      * 刷新底部四个跳转钮与进度条的可用性。
      *
      * 演奏/结算期间**整排都置灰**：演奏的位置由弹奏驱动，拖进度条只会让
-     * 滑块和光标对不上（以前能拖，滑块还会停在手指松开的地方）。
+     * 滑块和光标对不上。
      */
     private void updateTransportState() {
         // mLoadingBusy：两个 loading（冷启动 / 恢复进度）期间进度条与跳转钮一律灰。
@@ -4445,7 +4429,7 @@ public class PlayerActivity extends Activity {
      *
      * 行为对齐手机视频软件：**按下就开始拖**，横向位移实时换算成进度
      * （划满约 85% 屏宽 = 整曲），状态行跟着报小节，松手才真正落跳。
-     * 以前是"一次划动 = 前进/后退 5%"，手感完全不像拖动。
+     * 不要退回"一次划动 = 前进/后退 5%"的步进式手感。
      */
     @Override
     public boolean dispatchTouchEvent(android.view.MotionEvent ev) {

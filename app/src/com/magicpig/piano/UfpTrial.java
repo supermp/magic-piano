@@ -10,22 +10,14 @@ import android.util.Log;
 import com.mangofuture.algo.SfeInterface;
 
 /**
- * UFP（Uninterruptible Follow）演奏控制器 —— **原版 App 用的那条通路**。
+ * UFP（Uninterruptible Follow）演奏控制器。
  *
- * 下面这张对照表是历史的：旧的 magicPiano 通路（原 {@code MagicTrial} 类）
- * 已整体删除，留表只为说明"为什么没有逐音实时反馈"。
- * <pre>
- *            | magicPiano（旧，已删）        | UFP（本类，原版走的）
- * 建会话     | magicPianoInitModule          | ufpCreateMP + preloadTfModels(highPerf)
- * 起点       | magicPianoSetNoteSequence     | ufpSetCustomRangeWithResult（0=成功）
- * 喂音       | magicPianoFeedAudio           | ufpFeedAudio(pcm, len, status)
- * 过程反馈   | jsonStr 带 heads/bias（逐音） | status 只有光标/容错窗口/score（**没有逐音**）
- * 结束       | magicPianoGetFollowStatistics | ufpFinish（evaJson 带原生 rating）
- * </pre>
+ * 过程反馈只有光标/容错窗口/score，**没有逐音实时反馈**；结束由 ufpFinish
+ * 返回带原生 rating 的 evaJson。
  *
  * 关键前提：ufpCreateMP 之前**必须** preloadTfModels(true, true)
- * 否则返回 4（"no high-performance realtime model loaded"）—— 当初就是被这个 4
- * 误判成"UFP 不可用"。
+ * 否则返回 4（"no high-performance realtime model loaded"），不能把它当成
+ * "UFP 不可用"。
  */
 public final class UfpTrial {
 
@@ -154,7 +146,7 @@ public final class UfpTrial {
         }
         if (stale) {
             // 标记活着但**不属于本页面**：上一个页面遗留的会话（它 onStop 的
-            // abandon 没赶上这一轮建完），或者线程已死的历史残留。
+            // abandon 没赶上这一轮建完），或者线程已死的残留。
             // 一律先丢弃再重建 —— 否则新页面会直接失败：界面复位了，但 startTrial
             // 开头已经把演奏态打开（整小节高亮 + 演奏光标），于是「能点试听/选段 + 两道光标」。
             Log.w(TAG, "发现非本页面的残留会话，先丢弃再重建");
@@ -359,10 +351,10 @@ public final class UfpTrial {
                 Log.w(TAG, "stop：喂音线程 400ms 未退出，native 收尾可能与喂音并发");
             }
         }
-        // 结算要跑好几秒（ufpFinish）。这里**不再整段 return**：
-        // 原来一旦发现"已有新会话接管"就直接 return，结果是本轮的 native 句柄
-        // 永远没人释放（新 start 直接 create 覆盖），而且连成绩也拿不到。
-        // 现在只按 **handler 归属**决定能不能动 native；成绩回调照旧走完。
+        // 结算要跑好几秒（ufpFinish）。这里**不能整段 return**：
+        // 一旦发现"已有新会话接管"就直接 return，本轮的 native 句柄
+        // 会永远没人释放（新 start 直接 create 覆盖），成绩也拿不到。
+        // 只按 **handler 归属**决定能不能动 native；成绩回调照旧走完。
         final boolean handlerMine = handlerGen >= 0 && sHandlerGen == handlerGen;
         if (!handlerMine) {
             Log.w(TAG, "stop：本轮没有活 handler（快照 gen " + handlerGen + "，当前 "
@@ -373,13 +365,13 @@ public final class UfpTrial {
         // ⚠ 结算等待里只放**必须拿到结果**的两步：
         //   ufpFinish(res) 要写回评测 JSON，releaseUfpHandler 必须在下一次
         //   initPreviewModule 之前完成（预览模块与 UFP handler 全局互斥）。
-        //   initPreviewModule 原先也塞在这个同步块里，等于让用户多等一遍
+        //   initPreviewModule 不在这个同步块里：放进来的话，用户还要多等一遍
         //   "重新加载整份曲谱"，而成绩卡/红叉根本不需要它 —— 实测按停结算
         //   短弹 4.2s、长弹 14.7s，其中有一截是白等的。
-        // 改成 post（不 await）：引擎队列是串行的，后续任何试听/native 调用
+        // 结算只 post（不 await）：引擎队列是串行的，后续任何试听/native 调用
         // 都会排在它之后，所以不会"试听时预览模块还没好"。
         // 只有**要分数**时才阻塞等 ufpFinish；跳过时整个 native 收尾都丢到引擎队列。
-        // ⚠ releaseUfpHandler 不再和 ufpFinish 绑在一起等：跳过评分后它自己要
+        // ⚠ releaseUfpHandler 与 ufpFinish 分开：跳过评分后它自己要
         //   1.5 秒（ufpFinish 在时会顺带清掉大部分状态），而成绩卡根本不需要它。
         if (!skipScoring && handlerMine) {
             AlgoEngine.get().runOnEngine(() -> {
@@ -446,7 +438,7 @@ public final class UfpTrial {
      * 丢弃一个**遗留会话**：停线程、释放 native、恢复预览模块，但**不回调任何 UI**。
      *
      * 演奏是静态状态（mRunning），而页面可能在演奏中被返回键 / home 干掉。
-     * 以前没有任何收尾，会话就永远留在 mRunning=true、麦克风线程还活着，
+     * 没有收尾时，会话会永远留在 mRunning=true、麦克风线程还活着，
      * 用户再点「演奏」只会得到一句"已经在演奏中"，自己也没法恢复。
      */
     public static void abandon() {
@@ -473,7 +465,7 @@ public final class UfpTrial {
             liveSession = mRunning;
             myGen = liveSession ? sGen.incrementAndGet() : sGen.get();
             handlerGen = sHandlerGen;
-            // ⚠ 清静态引用必须在锁内、且赶在 join 之前。原来放在方法末尾，
+            // ⚠ 清静态引用必须在锁内、且赶在 join 之前：放在方法末尾的话，
             // join(600) 这段时间里新 start 写好的 listener 会被旧 abandon 清掉，
             // 新会话按停时 stop() 读到 null 直接不做事。
             sListener = null;
@@ -487,8 +479,8 @@ public final class UfpTrial {
             mRec = null;
             mFeedThread = null;
         }
-        // 即使没在跑也按引用释放残留的录音/线程引用：原来 !mRunning 直接
-        // return，失败残留的 mRec 会一直留到下一次会话。
+        // 即使没在跑也要按引用释放残留的录音/线程引用：只判断 !mRunning 就
+        // return 的话，失败残留的 mRec 会一直留到下一次会话。
         if (rec != null) {
             try {
                 rec.stop();
@@ -639,7 +631,7 @@ public final class UfpTrial {
         if (!alive(myGen)) return;
         int min = AudioRecord.getMinBufferSize(FEED_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        // 低延迟：原来留 4 个 CHUNK（≈186ms）的缓冲，读满一整块才喂 native，
+        // 低延迟：留 4 个 CHUNK（≈186ms）的缓冲、读满一整块才喂 native，
         // 加上系统缓冲就是"按下琴键到光标动"慢半拍的一部分。这里收到 2 个 CHUNK
         // （≈93ms），仍不低于系统要求的最小值，避免 underrun。
         int bufBytes = Math.max(min, CHUNK * 2 * 2);
@@ -724,7 +716,7 @@ public final class UfpTrial {
                     // 但真机上遇到过它立刻返回 0 的情况，写清楚不留歧义）。
                     int n = rec.read(buf, fill, CHUNK - fill, AudioRecord.READ_BLOCKING);
                     if (n <= 0) {
-                        // 没有麦克风 / 被占用时 read 会**立刻**返回 0：原来直接 break，
+                        // 没有麦克风 / 被占用时 read 会**立刻**返回 0：直接 break，
                         // 外层 while 马上再来一次 → 满核空转（模拟器上实测把 CPU 打满）。
                         if (n < 0) Log.w(TAG, "AudioRecord.read=" + n);
                         if (zeroReads++ < 20) {
@@ -863,11 +855,11 @@ public final class UfpTrial {
      * 设置判定区间，返回**真正生效**的终点 JSON（null = 区间没设上，退回整曲）。
      *
      * 终点是位置而不是"小节号"：越界一格（end = 小节数）直接返回 2 拒绝。
-     * 旧实现遇到 2 就退回「末小节 + offset 0」——那正好停在末小节的**第一颗音**，
-     * 于是最后一小节永远判不到（用户报的"光标走到最后一个小节第一颗音就结算"
-     * 和"末两小节弹错也不出红叉"，都是这个）。
+     * 遇到 2 不能退回「末小节 + offset 0」——那正好停在末小节的**第一颗音**，
+     * 于是最后一小节永远判不到（"光标走到最后一个小节第一颗音就结算"
+     * 和"末两小节弹错也不出红叉"，都是这个原因）。
      *
-     * 现在在末小节里**探测可用的最大 offset**：0、1、2 一路试到被拒为止，
+     * 这里在末小节里**探测可用的最大 offset**：0、1、2 一路试到被拒为止，
      * 取最后一个能用的位置。这样"到曲末"就能把最后一小节尽量完整地包进来。
      * 探测只有十几次 setCustomRange 调用（纯数据，不碰模型），相对建会话的
      * 几百毫秒可以忽略。

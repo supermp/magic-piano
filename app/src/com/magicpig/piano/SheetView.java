@@ -38,9 +38,9 @@ import java.util.Map;
  *
  * 【点谱面定位】点击坐标→小节 的换算全部由 JS 侧完成：渲染器命中音符后通过
  * onNoteClick2 上报 {measure, offset, voice}（native 侧 0-based）。
- * 这条通道是原版 App 自己用的，且自动处理页面滚动与双指缩放 —— 早先试过在
- * 原生侧用小节线坐标反推屏幕区间，谱面一滚动（播放时光标跟随会自动滚）映射
- * 就整体失效，点哪儿都跳错位置，故已删除，只保留 JS 通道。
+ * 这条通道是原版 App 自己用的，且自动处理页面滚动与双指缩放；不要在原生侧
+ * 用小节线坐标反推屏幕区间 —— 谱面一滚动（播放时光标跟随会自动滚）映射
+ * 就整体失效，点哪儿都跳错位置。
  */
 public class SheetView extends WebView {
 
@@ -51,8 +51,8 @@ public class SheetView extends WebView {
      *       所有符头保持黑色，避免和「合手/左手/右手」的灰化染色打架。
      *   2 = 都不画，只靠符头颜色（已废弃：灰漏弹太难发现，红错音又和手型冲突）
      *
-     * 用户 明确要回到"最早那个版本"的黑音符 + 红叉，并让红叉
-     * 演奏过程中保留到下一次出分作提醒；出分那一刻先清后画，只显示本轮结果。
+     * 用户明确要黑音符 + 红叉：红叉在演奏过程中保留到下一次出分作提醒；
+     * 出分那一刻先清后画，只显示本轮结果。
      */
     private static final int RESULT_MARK_STYLE = 1;
 
@@ -203,7 +203,7 @@ public class SheetView extends WebView {
     /** 手型：both / left / right。只用于给 CSS 挂 data-hand 类，渲染器永远画黑色 */
     private String mHandType = "both";
     /**
-     * 演奏态（只影响 Java 侧逻辑，**不再传给渲染器**）。
+     * 演奏态（只影响 Java 侧逻辑，**不传给渲染器**）。
      *
      * 现在渲染器恒用 mode="preview"，原因：magic 那套视觉差异全部只在
      * **重绘**时落地（谱线 0.5px、#DFCAB4 浅棕线、字号 39、bottomPadding=0），
@@ -250,8 +250,8 @@ public class SheetView extends WebView {
             @Override
             public void onPageFinished(WebView view, String url) {
                 mPageReady = true;
-                // ⚠ 这里以前是**无条件** sendInitPage()，而 show() 往往还没被调用
-                // （页面就绪早于谱面数据准备好），于是 mQueuedTitle 还是 null →
+                // ⚠ 不能在 onPageFinished 里**无条件** sendInitPage()：show() 往往还没
+                // 被调用（页面就绪早于谱面数据准备好），此时 mQueuedTitle 还是 null →
                 // 给渲染器的 name 是空串 → `e.name || isMagicMode` 为假 →
                 // 走 else 打 "FATAL: data.name is required."，并且**整个 6656 字符的
                 // 初始化块被跳过**（header_height / 左右 padding / bg_color /
@@ -590,7 +590,7 @@ public class SheetView extends WebView {
                 + "#auto-minify-score-notation{display:none !important;}"
                 // 演奏时"当前小节"那块底色：渲染器写死 #FFFFFF / 55% + 白描边，
                 // 铺在奶油白纸上就是一块突兀的白板（还会盖住谱表上方的速度记号）。
-                // 改成暖金低透明度，与自己的配色一致；去掉描边，边缘不再发亮。
+                // 暖金低透明度，与整体配色一致；无描边，边缘不会发亮。
                 + "#measureHighLight{fill:#F0C03C !important;fill-opacity:.10 !important;"
                 + "stroke:none !important;}"
                 // 颜色过渡：切换手型时淡入淡出，看不出"刷新"
@@ -716,7 +716,7 @@ public class SheetView extends WebView {
 
     /** 渲染曲谱；页面还没就绪会排队，等 onPageFinished 再发 */
     public void show(String sheetXml, String title) {
-        // 新谱面一定是预览态。exitTrial 正常路径也会 setMagicMode(false)，
+        // 新谱面一定是预览态。exitTrial 正常路径也会 setPerformMode(false)，
         // 但异常路径（建会话失败后直接换曲）可能漏，这里兜一道，避免
         // 演奏态的高亮/门控被带到下一首。
         mPerformMode = false;
@@ -757,7 +757,7 @@ public class SheetView extends WebView {
             // 正常路径下 show() 已经把标题写进来了，这里只是兜底。
             p.put("name", (mQueuedTitle == null || mQueuedTitle.isEmpty())
                     ? "sheet" : mQueuedTitle);
-            // 恒 preview：演奏态不再切 magic（见 mPerformMode 注释）。
+            // 恒 preview：演奏态由 Java 侧 mPerformMode 控制（见 mPerformMode 注释）。
             // 渲染器的 mode 只在这里写一次，之后全生命周期不变。
             p.put("mode", "preview");
             p.put("locale", "zh");
@@ -769,16 +769,13 @@ public class SheetView extends WebView {
             p.put("hand_type", "both");
             // 首行谱表的 Y 偏移（渲染器 MeasuresRows.firstRowY）。不传的话用默认 60，
             // 整个谱面块偏低 ~108px —— 顶部空一大片。
-            // 曾经为了不裁掉首行的 tempo 记号，这里留了 40（≈22 CSS px）：
-            // 记号和八度线都画在谱线上方，压到 0 会被视口顶裁掉。
-            // 现在速度标记已由 TempoMark 从 XML 摘掉、改在顶栏显示，这块空间不再需要，
+            // 速度标记已由 TempoMark 从 XML 摘掉、改在顶栏显示，这里不再为它留空间，
             // 只留 8 给其它"谱线上方"内容（指法弧线/八度线）一点呼吸。
             // 别再往上加：加多少就等于第一行多高多少，直接影响一屏行数。
             p.put("score_padding_top", 8);
             // initPage 里对 state 做的是**整体覆盖**
-            // （localGlobalState = e.state.global_state || {}），所以每次都传空对象
-            // （以前只在首次装载时传、切模式时不传，避免把本地覆盖态清掉；
-            //  演奏态不再切模式后，initPage 只剩"首次装载/尺寸修正"两个调用者）。
+            // （localGlobalState = e.state.global_state || {}），所以每次都传空对象，
+            // 避免把本地覆盖态清掉。initPage 的调用者只剩"首次装载/尺寸修正"。
             JSONObject state = new JSONObject();
             state.put("global_state", new JSONObject());
             state.put("score_state", new JSONObject());
@@ -808,7 +805,7 @@ public class SheetView extends WebView {
             // 为什么用曲谱区高而不是整屏高：两条栏占的比例各机不同（模拟器 97/640，
             // 21:9 手机 80/437），按整屏算会让手机的谱面偏大、第 3 行被顶出视口。
             // 基准是实测值：曲谱区 542.7 CSS → scale 0.65，正好 3 整行。
-            // 速度标记挪到顶栏后（见 TempoMark），**首行**不再为它留高度，首屏会多出
+            // 速度标记由顶栏显示（见 TempoMark），**首行**不留它的高度，首屏会多出
             // 约 35 CSS 的余量；但那部分空间只存在于第一行 —— 滚到中段以后每个小节
             // 本来就没有 tempo，放大整体 zoom 只会让中段少一行（真机上实测：
             // 0.46 时第 3 行的低音谱表掉到视口外）。所以 zoom 保持 0.65 不动。
@@ -912,8 +909,8 @@ public class SheetView extends WebView {
     /**
      * 取消选段：只把两个括号藏起来 + 清掉内部记录，**不重绘**。
      *
-     * （以前靠整页重绘清括号，副作用是谱面会重排、滚回曲首；drawV2 只画不擦，
-     * 但控制器本身有 setShow(false)，正好用来"擦"。）
+     * 整页重绘会重排谱面、滚回曲首；drawV2 只画不擦，控制器本身有
+     * setShow(false)，正好用来"擦"。
      */
     public void sectionClear() {
         try {
@@ -1136,7 +1133,7 @@ public class SheetView extends WebView {
      * @param highlightMeasure 是否把**整个当前小节**铺一块半透明高亮（原版试炼就是这么做的）。
      *
      * 渲染器里这是两个独立元素，对应两套语义：
-     *   - need_cursor            → `moveCursor(vfNote)`：一个音符级的光标（我们原来的金色胶囊）；
+     *   - need_cursor            → `moveCursor(vfNote)`：一个音符级的光标（金色胶囊）；
      *   - need_highlight_measure → `moveMeasureHighlight(measureCell)`：整个小节一块底色。
      * 详见 moveCursor 实现：`if (need_highlight_measure || need_highlight_line==1)
      * moveMeasureHighlight(cell) else moveMeasureHighlight(null)`。
@@ -1160,8 +1157,8 @@ public class SheetView extends WebView {
         long now = android.os.SystemClock.elapsedRealtime();
         if (mCursorInFlightAt != 0 && now - mCursorInFlightAt < 500) {
             // 丢掉的同时**记下最新位置**：回调一回来就补发这一帧。
-            // 以前只丢不记，全靠"下一帧音频"再触发 —— 试听时一旦碰上
-            // 一次慢回调，光标就会原地停住几百毫秒再跳过好几个音。
+            // 只丢不记就只能等"下一帧音频"再触发 —— 试听时碰上
+            // 一次慢回调，光标会原地停住几百毫秒再跳过好几个音。
             mCursorDeferred = new int[]{measure, offset, voice,
                     needCursor ? 1 : 0, highlightMeasure ? 1 : 0, forceScroll ? 1 : 0};
             return;
@@ -1334,8 +1331,8 @@ public class SheetView extends WebView {
             d.put("need_cursor", true);
             // 演奏态高亮当前小节（那块浅色底），预览态不要 ——
             // 试听时整块底色会跟滚动叠加，看着脏。
-            // 以前绑的是渲染器的 isMagicMode，现在渲染器恒 preview，
-            // 改成 Java 侧的 mPerformMode 独立判断，行为不变。
+            // 渲染器恒 preview，演奏态高亮由 Java 侧 mPerformMode 独立判断，
+            // 不读渲染器的 isMagicMode。
             d.put("need_highlight_measure", mPerformMode);
             d.put("need_highlight_line", false);
             d.put("forceScroll", scroll);
@@ -1378,7 +1375,7 @@ public class SheetView extends WebView {
         // 往往一个都还没有（实测 shown=0）。所以立即试一次 + 三次延迟补显，
         // 并用 __wbCursorHidden 让 hidePreviewCursor 能取消排队的任务。
         //
-        // ⚠ 只在**确实被藏起来**时才写属性：原来无条件 setAttribute('visibility')
+        // ⚠ 只在**确实被藏起来**时才写属性：无条件 setAttribute('visibility')
         // 每次都触发一次样式重算，四次补显叠在整页绘制期间，画面上就是光标闪几下。
         // 值没变就不要动它。
         String js = "(function(){window.__wbCursorHidden=false;"
@@ -1505,11 +1502,8 @@ public class SheetView extends WebView {
     /**
      * 退出演奏时把金色胶囊画回最后位置，**视口完全不动**。
      *
-     * 原来这里做的是「记下 scrollY → 画光标（H5 仍会滚 ~62px）→ 450/900ms
-     * 用 window.scrollTo 硬拉回」。那两次拉回本身就是用户看到的"往上小滚一下
-     * 再滚回来"：先由 H5 发起 200ms 滚动动画，再由 Java 无动画拽回去。
-     * 现在 {@link #setMagicMode} 在切回预览时冻结了所有非强制滚动，这几帧
-     * 根本不会产生位移，于是恢复逻辑只剩"把胶囊画回去"，不再需要补救。
+     * 不需要记 scrollY 再延迟拉回：{@link #setPerformMode} 在切回预览时冻结了
+     * 所有非强制滚动，这几帧不会产生位移，恢复逻辑只需"把胶囊画回去"。
      */
     private void restorePreviewCursor() {
         if (mSkipRestoreCursor) {
@@ -1597,31 +1591,30 @@ public class SheetView extends WebView {
     /**
      * 进/出演奏态。
      *
-     * **不再通知渲染器**（它恒 preview），只切 Java 侧一个布尔，外加管住 H5 的
-     * 非强制自动滚动窗口。
+     * 渲染器恒用 preview；本方法只切 Java 侧一个布尔，并管住 H5 的非强制自动
+     * 滚动窗口，不向渲染器传 mode。
      *
-     * 为什么不再传 mode="magic"：那套视觉差异只有在**重绘**时才落地（线宽 0.5、
-     * #DFCAB4 浅棕线、字号 39、bottomPadding=0），而现在切模式只补发 initPage、
-     * 不重绘，留在运行期的只剩 scrollToMeasure("top") 的 -(headerHeight+14) 偏移
-     * —— 正是"演奏态光标比试听/恢复低 22px"的直接来源。详见 {@link #mPerformMode}。
+     * 演奏态与预览态共用同一套 preview 渲染，避免重绘时切换线宽、字号和
+     * bottomPadding；运行期只保留 scrollToMeasure("top") 的 -(headerHeight+14)
+     * 偏移（演奏态光标因此比试听/恢复低 22px）。详见 {@link #mPerformMode}。
      *
      * 冻结窗口这一段仍然要留：退出演奏后 initPage 回执补画光标、
      * clearMeasureHighlight、markTrialResult 这些帧全是 forceScroll=false，
      * H5 却会把当前小节顶到视口顶部，起点不在第一行时就是"先往上小滚一下再滚回来"。
      */
-    public void setMagicMode(boolean magic) {
-        if (magic == mPerformMode) return;
-        mPerformMode = magic;
-        Log.i(TAG, "演奏态 -> " + (magic ? "on" : "off") + "（渲染器恒 preview）");
+    public void setPerformMode(boolean perform) {
+        if (perform == mPerformMode) return;
+        mPerformMode = perform;
+        Log.i(TAG, "演奏态 -> " + (perform ? "on" : "off") + "（渲染器恒 preview）");
         mUi.removeCallbacks(mUnfreezeScroll);
-        if (magic) {
+        if (perform) {
             freezeAutoScroll(false);
             return;
         }
         freezeAutoScroll(true);
         mUi.postDelayed(mUnfreezeScroll, AUTO_SCROLL_FREEZE_MS);
-        // 退出演奏收尾：原本挂在 initPage 回执里，现在不切模式就没有这次 initPage 了。
-        // 确保光标仍是胶囊，并按最后位置画回原位（演奏期间由引擎 moveCursor2 负责）。
+        // 退出演奏没有切换模式带来的 initPage：在这里确保光标仍是胶囊，
+        // 并按最后位置画回原位（演奏期间由引擎 moveCursor2 负责）。
         if (mPageReady && !mDestroyed) {
             applyCursorStyle();
             restorePreviewCursor();
@@ -1870,8 +1863,8 @@ public class SheetView extends WebView {
 
             case "isNotePositionInRange": {
                 // 渲染器的选段编辑模式会问"这个位置在不在允许的范围内"，
-                // 它读的是回包里的 in_range 字段（以前这里回 false，
-                // 于是 handleNoteClick 每次都判"超出范围"，点了什么也不会发生）。
+                // 它读的是回包里的 in_range 字段。这里必须回 true，否则
+                // handleNoteClick 每次都判"超出范围"，点什么都不会发生。
                 JSONObject r = new JSONObject();
                 try {
                     r.put("in_range", true);

@@ -17,10 +17,10 @@ import java.util.List;
  * 目前只剩算法引擎那套资产（algo_assets → files/algo）。曲谱包一律不内置：
  * 全部由外部拷贝进 Android/data/…/files/sheets/（见 SheetFetcher）。
  *
- * 【踩过的坑】APK 里的资产条目名必须是 "assets/algo_assets/sound/..." 这种
- * 正斜杠形式，Android 的 AssetManager 才能识别子目录。Windows 下用 jar.exe
- * 打包会写成反斜杠，导致 AssetManager.list() 返回空、open() 抛
- * FileNotFoundException。现在改用 pack.py（Python zipfile）打包，见 build.sh。
+ * 资产条目名必须是 "assets/algo_assets/sound/..." 这种正斜杠形式，
+ * AssetManager 才能识别子目录。Windows 下用 jar.exe 打包会写成反斜杠，
+ * 导致 AssetManager.list() 返回空、open() 抛 FileNotFoundException；
+ * 所以打包统一用 pack.py（Python zipfile），见 build.sh。
  */
 public final class AppAssets {
 
@@ -29,9 +29,8 @@ public final class AppAssets {
      *
      * ⚠ 不只是"结构"变了才 +1：`files/algo/**` 是**一次性解压**出来的副本，
      * native 引擎读的是那份、不是 APK 里的 assets。所以改了 `ALGConf.json`
-     * （判定参数）、模型或音源，都必须 +1，否则设备上永远是旧副本 ——
-     * 调 UFP 参数时就踩过：改完配置、装上 APK，`eva.json` 里的
-     * `params` 还是旧值，跑出来的评分一个字符都没变。
+     * （判定参数）、模型或音源，都必须 +1，否则设备上永远是旧副本，
+     * `eva.json` 里的 `params` 不会跟着更新。
      */
     private static final int VERSION = 7;
 

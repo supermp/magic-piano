@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""一键把「App + 曲谱」装到一台设备（新设备装机就跑这一条）。
+"""一键把「App + 曲谱」装到一台设备的同一条命令：
 
-以前要两条命令、还要手填 adb 路径和 serial：
-    adb install -r dist/magicpiano-<版本号>.apk
-    python tools/unpack_backup.py --adb "..." --serial "..."
-现在合成一条：
     python tools/deploy.py
 
 常用参数：
@@ -14,11 +10,11 @@
     python tools/deploy.py --top 500           # 只铺前 500 首，几十秒完事（试用/救急）
     python tools/deploy.py --category 考级      # 只铺某一分类
     python tools/deploy.py --album "巴斯蒂安钢琴速成 2B级"
-    python tools/deploy.py --full              # 连 cover.png 等一起铺（多约 3.1GB）
+    python tools/deploy.py --full              # 连 cover.png 等一起铺（体积更大）
     python tools/deploy.py --dry-run           # 只看会做什么，不真装
 
 说明：
-  * 默认**只铺 sheet.xml.enc**（App 唯一用到的文件），比铺全部文件省约 3.1GB 和时间。
+  * 默认**只铺 sheet.xml.enc**（App 唯一用到的文件），比铺全部文件省掉这部分体积和时间。
   * adb 自动探测：优先用 --adb，其次 local.env 的 ADB / ANDROID_SDK_DIR，最后 PATH。
   * 设备自动选：只连了一台就直接用；多台要加 --serial。
   * 曲谱是**增量**的：设备已有就跳过，中断后重跑即可。
@@ -97,7 +93,7 @@ def use_stage(args, subset, uuids):
     """挑一个解压暂存目录。
 
     fast_push 是「整个暂存目录一次 push」，所以**暂存里混着别的东西就会被一起推走**：
-    比如先全量铺过（暂存里 17969 首），再跑 --top 20，会把那 17969 首又推一遍。
+    比如先全量铺过（暂存里上万首），再跑 --top 20，会把那上万首又推一遍。
     因此按筛选条件、catalog 状态和本次 uuid 集分目录，并在签名变化时清空，
     保证推的正是这次要的。
     """
@@ -190,7 +186,7 @@ def main():
     ap.add_argument('--album', help='只铺这本曲集')
     ap.add_argument('--top', type=int, default=0, help='只铺前 N 首')
     ap.add_argument('--full', action='store_true',
-                    help='连 cover.png 等一起铺（默认只铺 sheet.xml.enc，省 3.1GB）')
+                    help='连 cover.png 等一起铺（默认只铺 sheet.xml.enc，省体积）')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-launch', action='store_true', help='装完不自动启动 App')
     ap.add_argument('--skip-catalog', action='store_true',
