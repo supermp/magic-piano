@@ -268,7 +268,7 @@ def main():
         fast_push(args, uuids, adb)
         return
 
-    todo, missing, ok, skip = [], [], 0, 0
+    todo, missing, failed, ok, skip = [], [], [], 0, 0
     for u in uuids:
         zp = os.path.join(BACKUP, u + '.zip')
         if not os.path.exists(zp):
@@ -300,24 +300,38 @@ def main():
                         else [n for n in z.namelist() if not n.endswith('/')]
                     for n in names:
                         z.extract(n, out)
+                    enc = os.path.join(out, 'sheet.xml.enc')
+                    if not os.path.isfile(enc) or os.path.getsize(enc) <= 0:
+                        raise ValueError('包内没有有效的 sheet.xml.enc')
             except Exception as e:
                 print('  !! 解包失败 %s: %s' % (u, e))
+                failed.append(u)
                 continue
-            adb('shell', 'mkdir -p %s' % remote_dir(u))
+            mk = adb('shell', 'mkdir -p %s' % remote_dir(u))
+            if mk.returncode != 0:
+                print('  !! 建目录失败 %s: %s'
+                      % (u, (mk.stderr or '').strip()[:120]))
+                failed.append(u)
+                continue
             for n in names:
                 r = adb('push', os.path.join(out, n), '%s/%s' % (remote_dir(u), n))
                 if r.returncode != 0:
                     print('  !! 推送失败 %s/%s: %s' % (u, n, (r.stderr or '').strip()[:120]))
+                    failed.append(u)
                     break
             else:
                 ok += 1
             if i % 200 == 0 or i == len(todo):
                 print('  进度 %d/%d  已铺 %d' % (i, len(todo), ok), flush=True)
 
-        print('\n完成：本次铺设 %d 首（跳过已有 %d，备份缺失 %d）'
-              % (ok, skip, len(missing)))
+        print('\n慢速铺设：成功 %d 首（跳过已有 %d，备份缺失 %d，失败 %d）'
+              % (ok, skip, len(missing), len(failed)))
         if missing:
             print('备份里没有的 uuid：%s…' % ', '.join(missing[:5]))
+        if failed:
+            print('解包/推送失败的 uuid：%s…' % ', '.join(failed[:5]))
+        if missing or failed:
+            raise SystemExit(1)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

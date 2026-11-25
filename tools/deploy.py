@@ -263,11 +263,19 @@ def main():
     # ---------- 收尾 ----------
     if args.dry_run:
         return
-    n = A('shell', 'find /sdcard/Android/data/%s/files/sheets/ -name sheet.xml.enc | wc -l'
+    n = A('shell',
+          'find /sdcard/Android/data/%s/files/sheets/ -name sheet.xml.enc | wc -l'
           % 'com.magicpig.piano')
-    print('\n设备侧谱文件总数：%s' % (n.stdout or '').strip())
+    count = (n.stdout or '').strip()
+    if n.returncode != 0 or not count.isdigit():
+        raise SystemExit('设备侧谱文件统计失败：%s'
+                         % ((n.stderr or n.stdout or '').strip()[-200:]))
+    print('\n设备侧谱文件总数：%s' % count)
     if not args.no_launch:
-        A('shell', 'am', 'start', '-n', 'com.magicpig.piano/.HomeActivity')
+        r = A('shell', 'am', 'start', '-n', 'com.magicpig.piano/.HomeActivity')
+        out = ((r.stdout or '') + (r.stderr or '')).strip()
+        if r.returncode != 0 or 'Error:' in out or 'Error type' in out:
+            raise SystemExit('启动 App 失败：%s' % out[-200:])
         print('已启动 App。')
     print('\n完成。')
 
