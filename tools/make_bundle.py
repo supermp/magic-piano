@@ -13,14 +13,15 @@
     python tools/make_bundle.py --album "..."      # 只打该曲集的乐谱，文件名带曲集名
     python tools/make_bundle.py --out 自定义名.zip
     python tools/make_bundle.py --dry-run          # 只算规模不打包
-    python tools/make_bundle.py --allow-missing    # 缺本地谱包时仍出包（默认拒绝）
+    python tools/make_bundle.py --allow-missing    # 缺本地谱包时仍出包（损坏仍拒绝）
 
 要点：
   * **ZIP_STORED 不压缩**：.enc 本身加密过、压缩比 1.01，压缩纯属白烧 CPU；
     jpg 也已是压缩格式。不压缩还能让 App 侧解压变成纯拷贝，快很多。
   * **zip64**：全量包 >4GB 必须开 zip64（Python 默认自动，Java ZipInputStream 支持）。
   * 乐谱只取 sheet.xml.enc（App 唯一读的文件），不带 cover.png 等附属文件。
-  * 默认要求本次选中的谱包全部存在且可读；只有显式 `--allow-missing` 才允许缺包出包。
+  * 默认要求本次选中的谱包全部存在且每个包可读；`--allow-missing` 只放行缺失，
+    损坏、为空或缺少 sheet.xml.enc 仍拒绝。
 """
 import argparse
 import io
@@ -100,7 +101,8 @@ def main():
     ap.add_argument('--no-catalog', action='store_true', help='不打 catalog.json（调试用）')
     ap.add_argument('--no-covers', action='store_true', help='不打封面')
     ap.add_argument('--dry-run', action='store_true')
-    ap.add_argument('--allow-missing', action='store_true', help='缺本地谱包时仍出包')
+    ap.add_argument('--allow-missing', action='store_true',
+                    help='缺本地谱包时仍出包（损坏/为空/无 enc 仍拒绝）')
     args = ap.parse_args()
 
     cat = json.load(open(CATALOG, encoding='utf-8'))
@@ -231,15 +233,16 @@ def main():
         if os.path.exists(tmp_out):
             os.remove(tmp_out)
 
-    # 默认全量包只留一份；筛选包和自定义 --out 不影响正式曲库包。
+    # 全量包只保留无筛选后缀的正式包；筛选包和自定义 --out 不删，便于与全量包并存。
     if not args.out and not suffix:
         for name in os.listdir(OUTDIR):
-            if (name.startswith(('magicpiano-library-', 'magicpiano-res-'))
-                    and name.endswith('.zip')):
-                old = os.path.join(OUTDIR, name)
-                if os.path.abspath(old) != os.path.abspath(out):
-                    os.remove(old)
-                    print('  删除旧曲库包：%s' % old)
+            if not (re.fullmatch(r'magicpiano-library-\d{8}\.zip', name)
+                    or name.startswith('magicpiano-res-')):
+                continue
+            old = os.path.join(OUTDIR, name)
+            if os.path.abspath(old) != os.path.abspath(out):
+                os.remove(old)
+                print('  删除旧曲库包：%s' % old)
 
     size = os.path.getsize(out)
     print('\n完成：%s' % out)

@@ -19,7 +19,8 @@ public interface TrialListener {
      * @param pitchResultJson ufpFinish 的 vexflow JSON，里面的 pitches_info 是**逐音对错**：
      *                      {@code {pitch_cluster_position, pitch:[{key, bias_type}]}}，
      *                      bias_type 取 ok / miss（漏弹）/ extra（弹错，附带正确音）。
-     *                      播放页据此在谱面上打出对勾与错音标记 —— 这是"错音展示"的唯一数据源。
+     *                      播放页据此在谱面上给所有非 ok 音画红叉，正确音符不画符号 ——
+     *                      这是"错音展示"的唯一数据源。
      * @param lastScore     过程中引擎报的实时分（恒 100，只作兜底）
      */
     void onFinished(String evaJson, String metricsJson, String pitchResultJson,

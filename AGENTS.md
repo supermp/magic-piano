@@ -56,7 +56,7 @@ magic-piano/
 ├── dist/                      # 本机交付物；不入库
 │   ├── magicpiano-<versionName>.apk
 │   ├── magicpiano-runtime-assets.zip  # 第三方开发资产，解到仓库根目录
-│   └── magicpiano-library-YYYYMMDD.zip  # SAF 曲库包，只留一份
+│   └── magicpiano-library-YYYYMMDD.zip  # SAF 全量曲库包（筛选包另名）
 ├── reference/                 # 本机参照 APK；不入库
 ├── cache/                     # 可重建状态；不入库
 │   ├── catalog/               # 曲库抓取快照与差异

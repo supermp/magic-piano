@@ -95,7 +95,7 @@ def use_stage(args, subset, uuids):
     fast_push 是「整个暂存目录一次 push」，所以**暂存里混着别的东西就会被一起推走**：
     比如先全量铺过（暂存里上万首），再跑 --top 20，会把那上万首又推一遍。
     因此按筛选条件、catalog 状态和本次 uuid 集分目录，并在签名变化时清空，
-    保证推的正是这次要的。
+    保证推的正是这次要的。签名与来源记录都放在目录外，避免被 adb push 带上设备。
     """
     import shutil
     import unpack_backup as U
@@ -111,17 +111,23 @@ def use_stage(args, subset, uuids):
     else:
         sig = 'enc|%s|%s' % (stamp, u_sig)
         d = os.path.join(BASE, 'cache', 'seed', 'ext')
-    mark = os.path.join(d, '.filter')
+    mark = U.stage_filter_path(d)
     old = None
     if os.path.isfile(mark):
         try:
             old = open(mark, encoding='utf-8').read().strip()
         except Exception:
             old = None
-    if os.path.isdir(d) and old != sig:
-        print('  暂存目录 %s 是「%s」的，与本次「%s」不同 → 清空重建'
-              % (os.path.basename(d), old or '未知', sig))
+    if old != sig:
+        if os.path.isdir(d):
+            print('  暂存目录 %s 是「%s」的，与本次「%s」不同 → 清空重建'
+                  % (os.path.basename(d), old or '未知', sig))
         shutil.rmtree(d, ignore_errors=True)
+        for p in (U.stage_meta_path(d), U.stage_meta_path(d) + '.tmp'):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
     os.makedirs(d, exist_ok=True)
     try:
         open(mark, 'w', encoding='utf-8').write(sig)
@@ -241,10 +247,16 @@ def main():
             cat = os.path.join(BASE, 'library', 'catalog.json')
             cov = os.path.join(BASE, 'library', 'covers')
             if os.path.isfile(cat):
-                A('push', cat, remote + '/catalog.json')
+                r = A('push', cat, remote + '/catalog.json')
+                if r.returncode != 0:
+                    raise SystemExit('推送 catalog.json 失败：%s'
+                                     % ((r.stderr or r.stdout or '').strip()[-200:]))
                 print('      已推送 catalog.json')
             if os.path.isdir(cov):
-                A('push', cov, remote + '/covers')
+                r = A('push', cov, remote + '/covers')
+                if r.returncode != 0:
+                    raise SystemExit('推送 covers/ 失败：%s'
+                                     % ((r.stderr or r.stdout or '').strip()[-200:]))
                 print('      已推送 covers/')
         U.fast_push(ns, u, A)
 

@@ -205,21 +205,17 @@ public class SheetView extends WebView {
     /**
      * 演奏态（只影响 Java 侧逻辑，**不传给渲染器**）。
      *
-     * 现在渲染器恒用 mode="preview"，原因：magic 那套视觉差异全部只在
-     * **重绘**时落地（谱线 0.5px、#DFCAB4 浅棕线、字号 39、bottomPadding=0），
-     * 而切模式只补发 initPage、不重绘，所以真正还在
-     * 运行期生效的 magic 分支只剩两条：
-     *   · scrollToMeasure("top") 的偏移 -(headerHeight+14)（magicModeTopScrollOffset）
-     *     —— 同一句"把光标顶到视口上方"，演奏态比试听/恢复低 22px 就是它；
-     *   · 双谱表光标的 y 公式（stavesRowOffsetYs 版 vs measureHeight 版）。
-     * 两条都是纯负担，没有一条是我们想要的，所以干脆不切。
+     * 渲染器恒用 mode="preview"；本字段只做两件事：整小节高亮、演奏态阻止预览光标补画。
+     * magic 那套视觉差异（谱线 0.5px、#DFCAB4 浅棕线、字号 39、bottomPadding=0）
+     * 只在**重绘**时落地；不切 mode，也不会带入 scrollToMeasure("top") 的 magic
+     * 偏移和双谱表光标的 y 公式。
      *
      * 原版 magic 的其它效果我们本来就没在用：呼吸光柱（光标已统一金胶囊）、
-     * 弹对变绿（改成全黑 + 红叉）、命中星光（未接）、onPageClick（没注册）、
+     * 弹对染色（当前全黑 + 红叉）、命中星光（未接）、onPageClick（没注册）、
      * levelRange 关卡裁剪（不传）。
      *
-     * 这个布尔现在只做一件事：演奏态给光标带整小节浅底（moveCursor2 的
-     * need_highlight_measure）。
+     * 这个布尔只影响演奏态：moveCursor2 的 need_highlight_measure，以及阻止 reissueCursor
+     * 在演奏中补画预览光标。
      */
     private boolean mPerformMode = false;
     /**
@@ -338,8 +334,7 @@ public class SheetView extends WebView {
         // 注意必须用 document.contains 而不是 parentNode：重绘时渲染器是把
         // 整个图层 <g> 从 SVG 根上摘下来再挂新的，被摘掉的元素 parentNode
         // 仍然非空（还指向那个已脱离的旧图层），只查 parentNode 会误判成
-        // "还在文档里"，于是继续更新一个看不见的节点 —— 这正是之前
-        // 「切完手型光标永久消失」的真正原因。
+        // "还在文档里"，于是继续更新一个看不见的节点；表现就是切完手型光标永久消失。
         int litIdx = app.indexOf("x.cursorPreview||((x.cursorPreview=document.createElementNS(i,\"g\"))");
         if (litIdx >= 0) {
             app = app.replace(
@@ -516,7 +511,7 @@ public class SheetView extends WebView {
         // 原版色板 high/low/miss/extra 会把符头染成红/灰等。问题有两个：
         //   1) 灰色"漏弹"在奶油白底上几乎看不见；
         //   2) 红色"错音"和手型切换的 CSS 灰化/黑色符头混在一起，分不清是判定还是手型。
-        // 用户 要求：所有音符保持黑色，只在错的音上画红叉（见上一条补丁）。
+        // 所有音符保持黑色，只在错的音上画红叉（见上一条补丁）。
         // ColorMap 是 followPitchColorMap / pitchResultMap 的来源，改这里就够了。
         // resultFrameColor 只画音团外框（不是音符），保留暖棕不干扰。
         String themeKey = "{\"high\":\"#EA5353\",\"low\":\"#35CEB3\","
@@ -530,10 +525,9 @@ public class SheetView extends WebView {
             Log.w(TAG, "符头色板补丁未命中（JS 结构变了？）");
         }
 
-        // 谱线粗细。isMagicMode 下渲染器还把谱线/小节线的描边压到 0.5px，
-        //    我们的谱表比原版小、屏密度又高，0.5px 会明显变虚。
-        //    CSS 压回 1px 的规则加在下面那段注入样式表里
-        //    （CSS 优先于 SVG presentation attribute）。
+        // 谱线粗细：渲染器的 magic 模式会把谱线/小节线的描边压到 0.5px。
+        // 本页恒 preview，但 CSS 仍显式锁 1px，避免以后误切 mode 时线变虚
+        // （CSS 优先于 SVG presentation attribute，规则加在下面注入的样式表里）。
         Log.i(TAG, "谱线粗细规则随样式表注入");
 
         html = html.replace("<head>", "<head>" + HELPER_JS + "<script>" + bridge + "</script>");
@@ -551,7 +545,7 @@ public class SheetView extends WebView {
         //
         // 【分手灰化用 CSS 做，不重绘】
         // 渲染器自己那套灰化是「画音符时按 staveId 上色」，想换手就得整页重画 ——
-        // 谱面会明显刷一下（之前就是这么做的，观感很差）。
+        // 谱面会明显刷一下，观感很差，所以这里不重绘，改用 CSS 灰化。
         // 而 DOM 里每一行谱表本来就是独立分组：
         //   g#vf-measuresRow-<行号>-<谱表号>.vf-staveCell
         // 谱表号 1 = 高音谱表（右手），2 = 低音谱表（左手）
@@ -716,7 +710,7 @@ public class SheetView extends WebView {
 
     /** 渲染曲谱；页面还没就绪会排队，等 onPageFinished 再发 */
     public void show(String sheetXml, String title) {
-        // 新谱面一定是预览态。exitTrial 正常路径也会 setPerformMode(false)，
+        // 新谱面一定是预览态。演奏结束的正常路径也会 setPerformMode(false)，
         // 但异常路径（建会话失败后直接换曲）可能漏，这里兜一道，避免
         // 演奏态的高亮/门控被带到下一首。
         mPerformMode = false;
@@ -1249,8 +1243,8 @@ public class SheetView extends WebView {
                     sc.put("align", "center");
                     sc.put("forceScroll", true);
                     // 必须显式关掉：scrollTo 的 need_highlight_measure 默认是 true
-                    // （渲染器里 `null==r&&(r=!0)`），会给当前小节画一块
-                    // #328DFF / 22% 透明度的蓝色矩形（就是用户点演奏后看到的那块）。
+                    // （渲染器里 `null==r&&(r=!0)`），会给当前小节画一块默认蓝色矩形
+                    // （#328DFF / 22%；这里的 CSS 已把它覆盖成暖金）。
                     sc.put("need_highlight_measure", false);
                 } catch (Exception ignored) {
                 }
@@ -1347,7 +1341,7 @@ public class SheetView extends WebView {
     }
 
     /**
-     * 藏掉**黄色胶囊**（#sheet-cursor-preview）。
+     * 藏掉**金色胶囊**（#sheet-cursor-preview）。
      *
      * 现在唯一的用途是**进选段时**：那条光标表示"播放到哪儿"，选段过程中没意义，
      * 而且正好压在括号上。演奏/试听都用同一枚胶囊，不需要再藏。
@@ -1363,7 +1357,7 @@ public class SheetView extends WebView {
     }
 
     /**
-     * 把预览态的黄色胶囊**显式显出来**。
+     * 把预览态的金色胶囊**显式显出来**。
      *
      * `HIDE_TRAIL_CURSORS_JS` 会把所有胶囊设成 hidden；之后 moveCursor2 只重画
      * 胶囊本身，不会把 visibility 改回来 —— 于是进谱时虽然下发了 `C=1`，
@@ -1592,11 +1586,11 @@ public class SheetView extends WebView {
      * 进/出演奏态。
      *
      * 渲染器恒用 preview；本方法只切 Java 侧一个布尔，并管住 H5 的非强制自动
-     * 滚动窗口，不向渲染器传 mode。
+     * 滚动窗口，不会在演奏时再向渲染器切换 mode。
      *
      * 演奏态与预览态共用同一套 preview 渲染，避免重绘时切换线宽、字号和
-     * bottomPadding；运行期只保留 scrollToMeasure("top") 的 -(headerHeight+14)
-     * 偏移（演奏态光标因此比试听/恢复低 22px）。详见 {@link #mPerformMode}。
+     * bottomPadding；渲染器只收到 preview，所以不会带入 magic 的 scrollToMeasure
+     * 偏移和双谱表光标 y 公式。详见 {@link #mPerformMode}。
      *
      * 冻结窗口这一段仍然要留：退出演奏后 initPage 回执补画光标、
      * clearMeasureHighlight、markTrialResult 这些帧全是 forceScroll=false，

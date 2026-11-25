@@ -189,22 +189,38 @@ def catalog_uuids():
 
 
 def push_meta(d, manifest_path=MANIFEST):
-    d('shell', 'mkdir -p %s/covers %s/sheets' % (REMOTE, REMOTE))
-    d('shell', 'touch %s/sheets/.nomedia' % REMOTE)
+    """推送目录、清单与封面；返回（可打印摘要，失败项列表）。
+
+    调用方必须把失败项并入设备的最终结果，不能只看最后的 enc 数量：
+    catalog 推失败时 enc 仍可能齐全，但 App 首页已经读不到目录。
+    """
+    failed = []
+    if d.rc('shell', 'mkdir -p %s/covers %s/sheets' % (REMOTE, REMOTE)) != 0:
+        failed.append('covers/sheets 目录')
+    if d.rc('shell', 'touch %s/sheets/.nomedia' % REMOTE) != 0:
+        failed.append('.nomedia')
     ok = []
     for src, dst in ((CATALOG, 'catalog.json'), (manifest_path, 'library_manifest.json')):
         r = run([d.adb, '-s', d.serial, 'push', src, '%s/%s' % (REMOTE, dst)])
-        ok.append('%s=%s' % (dst, 'ok' if r.returncode == 0 else 'FAIL'))
+        good = r.returncode == 0
+        ok.append('%s=%s' % (dst, 'ok' if good else 'FAIL'))
+        if not good:
+            failed.append(dst)
     r = run([d.adb, '-s', d.serial, 'push', COVERS + os.sep + '.',
              '%s/covers' % REMOTE])
-    ok.append('covers=%s' % ('ok' if r.returncode == 0 else 'FAIL'))
+    good = r.returncode == 0
+    ok.append('covers=%s' % ('ok' if good else 'FAIL'))
+    if not good:
+        failed.append('covers')
     # 设备侧不需要 APK 指纹；清掉可能残留的旧文件。
     d('shell', 'rm -f %s/app_fingerprint.txt' % REMOTE)
-    return ', '.join(ok)
+    return ', '.join(ok), failed
 
 
 def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
+    """同步一台设备；返回 False 表示它没有达到目标状态。"""
     serial = d.serial
+    ok = True
     print('\n===== %s =====' % serial)
     print('型号 %s' % (d('shell', 'getprop ro.product.model') or '').strip())
 
@@ -218,6 +234,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
             # 直接装等于降级，App 可能带着不兼容的存档/曲包口径。
             print('App：设备 versionCode %d 高于本机 %d，**拒绝降级**'
                   % (dev_vc, local_vc))
+            ok = False
         else:
             action = ('首装（设备未安装）' if dev_vc == 0
                       else 'versionCode %d -> %d' % (dev_vc, local_vc))
@@ -230,12 +247,14 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
                       % (action, tail[-1] if tail else 'no output'))
                 if r.returncode != 0:
                     print('  !! 安装失败，继续同步曲包')
+                    ok = False
                 else:
                     # 装完回读一次：versionCode 对不上说明装错了包（或包被系统拦下）
                     back_vc = d.installed_version_code()
                     if back_vc != local_vc:
                         print('  !! 安装后回读 versionCode=%d，与本机 %d 不一致'
                               % (back_vc, local_vc))
+                        ok = False
 
     # ---- 曲包差异 ----
     raw = d.read_remote('%s/library_manifest.json' % REMOTE)
@@ -261,7 +280,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
                   '疑似目录被清空或设备异常' % len(ds))
             if not args.force:
                 print('    已跳过这台；确认要重铺整库请加 --force')
-                return
+                return False
             print('    --force 已指定，按全量待补继续')
         manifest_gap = sorted((allowed & set(ds)) - have)
         add = sorted((allowed - set(ds)) | set(manifest_gap))
@@ -305,7 +324,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
                               ', '.join(delisted[:3])))
 
     if args.dry_run:
-        return
+        return ok
 
     need = sorted(set(add) | set(replace))
     if need:
@@ -318,6 +337,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
         print('谱包：%s' % (' | '.join(lines[-3:]) if lines else 'no output'))
         if r.returncode != 0:
             print('  !! 铺谱包失败：%s' % (r.stderr or '')[-200:])
+            ok = False
     else:
         print('谱包：无需推送')
 
@@ -328,6 +348,7 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
         if len(delisted) > 50:
             print('下架清理：%d 个，超过 50，先不自动删（catalog 可能有问题，先人工核对）'
                   % len(delisted))
+            ok = False
         else:
             removed = set()
             for u in delisted:
@@ -346,24 +367,33 @@ def sync_one(d, local, local_sha, local_vc, catalog_set, args, apk_path):
                         loc_n += 1
                     except OSError as e:
                         print('  !! 删本地包失败 %s：%s' % (u[:8], e))
+                        ok = False
             failed = [u for u in delisted if u and '/' not in u and u not in removed]
             if failed:
                 print('  !! 设备删除失败，保留本地 zip：%s' % ', '.join(failed[:3]))
+                ok = False
             print('下架清理：设备 %d / 本地 %d（共 %d 个下架）'
                   % (len(removed), loc_n, len(delisted)))
 
     # ---- 元数据（目录、封面与设备侧版本清单）----
-    print('元数据：%s' % push_meta(d, args.manifest))
+    meta, meta_failed = push_meta(d, args.manifest)
+    print('元数据：%s' % meta)
+    if meta_failed:
+        print('  !! 元数据推送失败：%s' % ', '.join(meta_failed))
+        ok = False
 
     # ---- 核对 ----
     enc = d.enc_uuids()
     back = d.read_remote('%s/library_manifest.json' % REMOTE)
+    back_sha = hashlib.sha256(back).hexdigest() if back else None
+    verified = bool(len(enc) == local['sheet_count'] and back_sha
+                    and back_sha == local_sha)
     print('核对：enc %d（清单 %d） / covers %d / 设备清单 sha %s（本机 %s）'
           % (len(enc), local['sheet_count'], d.cover_count(),
-             hashlib.sha256(back).hexdigest()[:12], local_sha[:12]))
-    print('结果：%s' % ('OK' if len(enc) == local['sheet_count']
-                       and back and hashlib.sha256(back).hexdigest() == local_sha
-                       else '需复查'))
+             back_sha[:12] if back_sha else '(缺失)', local_sha[:12]))
+    result = bool(verified and ok)
+    print('结果：%s' % ('OK' if result else '需复查（见上方失败项）'))
+    return result
 
 
 def latest_apk():
@@ -427,12 +457,18 @@ def main():
     if not serials:
         raise SystemExit('没有在线设备（adb devices）')
     print('目标设备：%s' % ', '.join(serials))
+    failed = []
     for s in serials:
         try:
-            sync_one(Device(args.adb, s), local, local_sha, local_vc,
-                     catalog_set, args, args.apk)
+            if not sync_one(Device(args.adb, s), local, local_sha, local_vc,
+                            catalog_set, args, args.apk):
+                failed.append(s)
         except Exception as e:
             print('!! %s 同步异常：%s' % (s, e))
+            failed.append(s)
+    if failed:
+        print('\n!! %d 台设备未完成同步：%s' % (len(failed), ', '.join(failed)))
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

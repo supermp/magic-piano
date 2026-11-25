@@ -6,7 +6,7 @@ App 端已经没有任何下载逻辑：曲谱只能放在
 没有拷贝进去的曲谱，点开只弹 toast，不会联网。所以这个脚本就是离线版的"装填器"。
 
 用法：
-python tools/unpack_backup.py --serial <serial>  # adb 来自 local.env 或 PATH
+    python tools/unpack_backup.py --serial <serial>  # adb 来自 local.env 或 PATH
     python tools/unpack_backup.py --only-enc            # 只铺 sheet.xml.enc
     python tools/unpack_backup.py --album "巴斯蒂安钢琴速成 2B级"   # 只铺某一本曲集
     python tools/unpack_backup.py --uuid <uuid> [...]   # 只铺指定乐曲
@@ -46,6 +46,11 @@ STAGE_DIR = os.path.join(BASE, 'cache', 'seed', 'ext')
 def stage_meta_path(stage):
     """暂存目录的来源记录放在目录外，避免随目录一起 adb push 到设备。"""
     return stage + '.src.json'
+
+
+def stage_filter_path(stage):
+    """筛选签名也放在暂存目录外：`adb push stage/.` 会整目录上设备。"""
+    return stage + '.filter'
 
 
 def load_stage_meta(stage):
@@ -112,12 +117,19 @@ def fast_push(args, uuids, adb):
     """在本地把目录树搭好，然后一条 adb push 推完。
 
     逐个文件调 adb 的话，每次都要建一次连接、跑一次 sync 协议；
-    全量上万首实测要一个多小时。改成"本地搭树 + 目录级 push"后
-    （adb 内部走单次 sync 会话）只要 2~3 分钟，实测 28MB/s。
+    全量上万首实测要一个多小时。本地搭树 + 目录级 push 走单次 sync 会话，
+    只要 2~3 分钟，实测 28MB/s。
     """
     # 解压暂存目录（deploy.py 在"全量模式"下会换一个，避免和"只铺 enc"的暂存混在一起）
     stage = STAGE_DIR
     os.makedirs(stage, exist_ok=True)
+    # 暂存目录里如果还残留筛选签名，目录级 push 会把它带上设备；推送前清掉。
+    legacy_filter = os.path.join(stage, '.filter')
+    if os.path.exists(legacy_filter):
+        try:
+            os.remove(legacy_filter)
+        except OSError:
+            pass
     mode = 'enc' if args.only_enc else 'all'
     meta = load_stage_meta(stage)
     if meta.get('mode') != mode:

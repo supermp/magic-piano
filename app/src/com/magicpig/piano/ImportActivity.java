@@ -290,8 +290,8 @@ public class ImportActivity extends Activity {
             ZipInputStream zis = new ZipInputStream(raw);
             byte[] buf = new byte[BUF];
             ZipEntry e;
-            // processed 单独计数：进度刷新原来挂在"成功写入数 n"上，
-            // 二次导入（绝大多数条目都在跳过）时 n 一直是 0，进度条纹丝不动。
+            // processed 单独计数：进度不能挂在"成功写入数 n"上，
+            // 二次导入（绝大多数条目都在跳过）时 n 一直是 0，进度条不会动。
             int processed = 0;
             while (!mCancelled && (e = zis.getNextEntry()) != null) {
                 String name = e.getName();

@@ -220,7 +220,7 @@ public final class UfpTrial {
                 String eJson = applyRange(sJson, start, end);
                 SfeInterface.NotePosition p0 = SfeInterface.ufpGetFirstValidPosition();
                 Log.i(TAG, "firstValid=" + fmt(p0));
-                created[0] = 0;   // 建会话成功（之前漏了这一句，导致永远判失败）
+                created[0] = 0;   // 建会话成功标志；漏掉这一句会永远判失败
             } catch (Throwable t) {
                 err.append(String.valueOf(t));
                 created[0] = -1;

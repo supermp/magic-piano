@@ -72,10 +72,10 @@ public class PlayerActivity extends Activity {
     /** 目标行已画出、但连续几次都判"不在视口"（滚动失效）的计数 */
     private int mRestoreDrawnStuck;
     /**
-     * 恢复等待的**总**上限。只靠固定 90 秒兜底，会让卡片停在"正在准备第 x/y 小节"
-     * 上不动、不点取消就一直等：手机上长曲（384 小节）逐行渲染本来就要几十秒。
-     * 三条提前退出（见 {@link #mRestorePollRun}：目标上屏 / 目标已画但滚动失效 /
-     * 渲染停滞）优先，这个上限只是最后的硬保底。
+     * 恢复等待的**总**上限（25 秒）。三条提前退出（见 {@link #mRestorePollRun}：
+     * 目标上屏 / 目标已画但滚动失效 / 渲染停滞）优先，这个上限只是最后的硬保底。
+     * 只靠固定超时兜底会让卡片停在“正在准备第 x/y 小节”上不动、不点取消就一直等：
+     * 手机上长曲（384 小节）逐行渲染本来就要几十秒。
      */
     private static final long RESTORE_POLL_MAX_MS = 25000;
     /**
@@ -684,9 +684,9 @@ public class PlayerActivity extends Activity {
                 mFirstRowsShown = true;
                 // 整页画出来了 → 说明渲染恢复正常，重建计数清零（下次崩还能再救一次）
                 sRenderRebuilds = 0;
-                // 遮罩**在这里才撤**：大谱面（100 万+ 字符的 XML）要 2~3 秒才画完，
-                // 之前在 mSheet.show() 之后就撤，中间就是一段白屏，
-                // 看着像"卡住/还在载入"。让"正在载入曲谱"一直撑到画面真的出来。
+                // 遮罩必须等首屏真正画完才撤：大谱面（100 万+ 字符的 XML）要 2~3 秒，
+                // 若在 mSheet.show() 后立刻撤，中间就是一段白屏，看着像"卡住/还在载入"。
+                // 让"正在载入曲谱"一直撑到画面真的出来。
                 showLoading(false);
                 openEntryButtons();
                 // 整页画完再恢复"阅读现场"（选段 + 光标）：提前滚会露白。
@@ -947,9 +947,8 @@ public class PlayerActivity extends Activity {
             mLoadingCancel.setVisibility(
                     on && (mRestoring || mJumpTarget != null) ? View.VISIBLE : View.GONE);
         }
-        // 两个 loading 用同一套：都盖全屏拦截层、都把入口按钮置灰、返回箭头都保持可点。
-        // 用户 要求"这两个统一一下"，之前冷启动只有一张小卡片（按钮状态
-        // 各不一样、返回能点），恢复中却是全锁（返回也点不了）。
+        // 两个 loading 共用同一套：都盖全屏拦截层、都把入口按钮置灰、返回箭头都保持可点。
+        // 冷启动与恢复进度不能各自维护不同的按钮状态，否则同一套遮罩会出现两种交互。
         if (mRestoreOverlay != null) mRestoreOverlay.setVisibility(on ? View.VISIBLE : View.GONE);
         if (uiGone()) return;
         if (on) lockEntryButtons();
@@ -1465,7 +1464,7 @@ public class PlayerActivity extends Activity {
         // 「选段中」和「取消选段」用同一个图标：两个状态下点这一下都是"撤掉当前选段"，
         // 只有空闲态（点了是进入选段）才用普通的括号图标。
         mSectionBtn.setState("ic_sheet_section_off.png", "选段中");
-        // 选段期间不需要那个黄色预览光标（它表示"播放到哪儿"，此刻没意义），
+        // 选段期间不需要那个金色预览光标（它表示"播放到哪儿"，此刻没意义），
         // 而且它正好会盖在括号上。演奏/试听也一并置灰 —— 范围还没定，不该开跑。
         mSheet.hidePreviewCursor();
         mSheet.sectionClear();
@@ -2084,10 +2083,10 @@ public class PlayerActivity extends Activity {
     /**
      * 进入结算：按钮置灰 + 显示「正在结算」卡片（同一张卡，出分时原地变成绩卡）。
      *
-     * 用户按停和引擎自然弹到曲末（state=3）两条路径都必须走这里。
-     * 之前只有按停那条做了反馈：自然结束是 feedLoop 在末尾直接调
-     * stop(listener,false)，native ufpFinish 要好几秒，这段时间界面仍显示
-     * 「演奏中」、光标钉在最后一个音上 —— 用户反馈就是"最后一个音卡了很久"。
+     * 用户按停和引擎自然弹到曲末（state=3）两条路径都必须走这里：
+     * 自然结束是 feedLoop 在末尾直接调 stop(listener,false)，native ufpFinish
+     * 要好几秒；不进结算的话，这段时间界面仍显示「演奏中」、光标钉在最后一个音上，
+     * 用户看到的就是"最后一个音卡了很久"。
      * 按钮文案**不改**：状态由卡片统一表达，按钮只负责不可用（置灰）。
      * 结算期间卡片外区域不可点，卡片内只有「正在结算…」+ 转圈，按钮都还没露面。
      * 幂等：state=3 可能连报几帧。
@@ -2109,7 +2108,7 @@ public class PlayerActivity extends Activity {
      *
      * ⚠ 不能挂在光标帧上做：真机演奏走麦克风，**不弹就没有 onCursor**，
      * 靠帧驱动等于没有 —— 用户滚走之后永远回不来。
-     * 这里改成定时任务，与是否在弹奏无关。
+     * 因此用定时任务，与是否在弹奏无关。
      */
     private final Runnable mTrialFollow = new Runnable() {
         @Override
@@ -2246,9 +2245,8 @@ public class PlayerActivity extends Activity {
         // 三重保护），从这里重复调是安全的。
         restoreSavedState();
         // ⚠ 底部进度条 + 四个跳转钮不在上面的顶栏推导里，由本方法统一收口。
-        // 之前冷启动靠 bootstrap() 里那次 updateTransportState() 恢复，而"恢复存档"
-        // 结束不会再走 bootstrap —— 于是遮罩撤了、顶栏亮了，底部却还是灰的。
-        // 两个 loading 现在都在撤遮罩时走到这里。
+        // 冷启动和恢复存档结束都必须走到这里；不能只在 bootstrap 里更新一次，
+        // 否则恢复结束后遮罩撤了、顶栏亮了，底部却还是灰的。
         updateTransportState();
     }
 
@@ -3048,10 +3046,8 @@ public class PlayerActivity extends Activity {
      * 不载入存档 / 没有存档：把光标**画在乐谱最开始的地方**
      * 同时把播放头 / 进度条 / 状态行一起归零（AlgoEngine 单例不会自己复位）。
      *
-     * 之前为了躲"进谱微小上移"把这一步整段删掉，结果谱面上根本没有可见光标 ——
-     * 等于把用户的需求改没了。上移的根因已在渲染器侧修掉
-     * （见 SheetView 的「首行 top 滚动补丁」：视口在顶部时，第一行的 top 对齐
-     * 滚动会被短路），所以这里可以正常下发 moveCursor2 画曲首光标，视口不动。
+     * 上移的根因由渲染器侧的「首行 top 滚动补丁」处理（视口在顶部时，第一行的 top 对齐
+     * 滚动会被短路），所以这里正常下发 moveCursor2 画曲首光标，视口不动。
      *
      * ⚠ **画上去之后必须锁住可见性**：首屏只画了前一两行，剩下的行还在后台
      * 一批批补，大谱面（保卫黄河）还要补 4~6 秒；每批重绘都会把光标元素改回
@@ -3157,7 +3153,7 @@ public class PlayerActivity extends Activity {
             mPlacingStart = false;
         }
         // moveCursor2 只重画胶囊，不会把被 HIDE_TRAIL_CURSORS_JS 藏掉的整组
-        // 重新显出来；补一刀，曲首的黄色光标才真的看得见（见 SheetView.showPreviewCursor）。
+        // 重新显出来；补一刀，曲首的金色光标才真的看得见（见 SheetView.showPreviewCursor）。
         mSheet.showPreviewCursor();
         scheduleStartMarkReset();
         Log.i(TAG, "光标放在曲首（首行不滚动，不算用户定位）");
@@ -3310,7 +3306,7 @@ public class PlayerActivity extends Activity {
      *
      * 演奏结束会把预览胶囊画回最后弹到的地方，但播放头是另一套状态（默认曲首）。
      * 不同步的话，屏幕上光标在第 5 小节、下次点演奏却从第 1 小节开始 ——
-     * 用户看到的就是"没从黄色光标的位置开始"。
+     * 用户看到的就是"没从金色光标的位置开始"。
      */
     private void syncHeadToCursor() {
         int m = mSheet.lastMeasure();
@@ -3514,8 +3510,8 @@ public class PlayerActivity extends Activity {
                     } else {
                         syncHeadToCursor();
                     }
-                    // 逐音结果标记（对勾 = 弹对、蓝 = 漏弹、黄 = 弹错）：逐音对错
-                    // 只存在于 ufpFinish 返回的 vexflow JSON（pitches_info）。
+                    // 逐音结果标记：所有非 ok（漏弹/弹错/节奏错）统一画红叉，正确音符不画符号；
+                    // 数据只存在于 ufpFinish 返回的 vexflow JSON（pitches_info）。
                     mSheet.markTrialResult(buildResultJson(evaJson, pitchResultJson));
                     if (!userStopped) {
                         final boolean sec = mSecOn && mSecStartM >= 0;
@@ -3534,7 +3530,6 @@ public class PlayerActivity extends Activity {
                 // 演奏结束后状态行回到光标所在的小节（演奏期间一直在报它）
                 setMeasureStatus(mCurMeasure);
             });
-            // 完整评测 JSON 已落盘（见上面 cache/eva.json），这里不刷屏
         }
 
         /**
@@ -4401,9 +4396,9 @@ public class PlayerActivity extends Activity {
      */
     private void updateTransportState() {
         // mLoadingBusy：两个 loading（冷启动 / 恢复进度）期间进度条与跳转钮一律灰。
-        // 之前 bootstrap() 在 mLoaded=true 后单独调一次本方法，把进度条放开了，
-        // 可遮罩要等首屏回调才撤 —— 那一小段窗口看着能拖、拖了又被后面的恢复
-        // 状态覆盖。遮罩撤掉时 showLoading(false) 会再调一次。
+        // 不要在 bootstrap 里 mLoaded=true 后单独放开一次：遮罩要等首屏回调才撤，
+        // 那一小段窗口看着能拖、拖了又被后面的恢复状态覆盖。
+        // 遮罩撤掉时 showLoading(false) 会再调一次本方法。
         // 上一首/下一首搬到顶栏，但置灰口径不变（同一个 busy + 曲集边界）。
         boolean busy = mTrialRunning || mTrialSettling || mSwitching
                 || mRestoring || mLoadingBusy;

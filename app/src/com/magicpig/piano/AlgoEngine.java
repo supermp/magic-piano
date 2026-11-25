@@ -107,12 +107,12 @@ public final class AlgoEngine {
             long t2 = SystemClock.elapsedRealtime();
             SfeInterface.setTfLiteCallbacks();
             mInited = true;
-            // 注意：**不再在这里 preloadTfModels**。那会把演奏用的 84MB 转谱模型
-            // 一并塞进内存，播放页白等好几秒。改成进演奏时才加载 —— 由
+            // 注意：**不在这里 preloadTfModels**。那会把演奏用的 84MB 转谱模型
+            // 一并塞进内存，播放页白等好几秒。模型只在进演奏时加载 —— 由
             // UfpTrial 在建会话前直接调 SfeInterface.preloadTfModels(true, true)
             // （必须 highPerf，否则 ufpCreateMP 返回 4）。
             Log.i(TAG, "引擎就绪：引擎初始化 " + (t1 - t0) + "ms，加载 62MB 钢琴音源 "
-                    + (t2 - t1) + "ms，合计 " + (t2 - t0) + "ms（ML 模型已改为演奏时加载）");
+                    + (t2 - t1) + "ms，合计 " + (t2 - t0) + "ms（ML 模型在演奏时加载）");
         });
     }
 
@@ -271,7 +271,7 @@ public final class AlgoEngine {
      *     只数 `<measure number=` 会**偏小** —— 进度条拖到最右也到不了真正的曲末；
      *   · 各 part 的小节数在真实谱包里并不总是相等（空 part、只写了一半的 part），
      *     一除就两头都不准。
-     * 现在改成**逐 part 各自数所有 `<measure` 标签，取最大值**：既不依赖 number
+     * 当前做法是**逐 part 各自数所有 `<measure` 标签，取最大值**：既不依赖 number
      * 属性，也不要求各 part 等长。<part-list> 是 `<part-`，靠"part 后面必须跟空格"
      * 区分开；`<measure-distance>` / `<measure-style>` 靠"measure 后面必须跟空格或 >"
      * 区分开。
@@ -349,7 +349,7 @@ public final class AlgoEngine {
     /**
      * 扫 [from,to) 里所有 `<measure>` 标签，把每个的 number 数字部分收进 `out`
      * （读不出数字记 0）。**一遍扫描同时给出小节个数**（= out.size()）与编号，
-     * 原来"数个数"和"收编号"是两个几乎一样的循环，等于把 1~3MB 的 XML 扫两遍。
+     * 不要在首屏路径上把 1~3MB 的 XML 扫两遍。
      *
      * 认标签的规则：`<measure` 后面必须是空格或 `>`（排除 `<measure-distance>` /
      * `<measure-style>`）；number 取值只认双引号紧跟数字（`X1` / `1a` 记 0）。
@@ -668,7 +668,7 @@ public final class AlgoEngine {
          *
          * 关键点：位置取 <b>AudioTrack.getPlaybackHeadPosition()</b>（硬件已经播出去的量），
          * 而不是"写了多少"。两者的差就是缓冲区占用 —— bufBytes = 196000 字节
-         * = 98000 采样 ≈ 1.11 秒，之前正是这个差值让光标一直跑在音乐前面。
+         * = 98000 采样 ≈ 1.11 秒，这个差值会让光标一直跑在音乐前面。
          */
         private final Runnable mTick = new Runnable() {
             @Override
@@ -977,10 +977,9 @@ public final class AlgoEngine {
     /**
      * 只排队、**不等待**。
      *
-     * ⚠ {@link #post(Runnable)} 内部 `latch.await()`，事实上是同步调用 ——
-     * 之前几处"异步收尾"的注释都写错了，低端机上照样会把调用线程卡住
-     * （实测 releaseUfpHandler 3 秒，全卡在按停的那条线程上）。
-     * 需要"排到引擎队列但不阻塞调用方"时用这个。
+     * ⚠ {@link #post(Runnable)} 内部 `latch.await()`，事实上是同步调用；
+     * 低端机上会照样把调用线程卡住（实测 releaseUfpHandler 3 秒）。需要
+     * "排到引擎队列但不阻塞调用方"时用这个。
      */
     public void postAsync(Runnable r) {
         if (Thread.currentThread() == mThread) {

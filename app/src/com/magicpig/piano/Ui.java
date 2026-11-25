@@ -177,13 +177,13 @@ public final class Ui {
         TextView tv = new TextView(a);
         tv.setText(label);
         tv.setTypeface(titleFont(a));
-        // 21 → 16：与图标一起缩小，保持"图标略大于字"的比例
+        // 字号 16sp：与图标一起缩小，保持"图标略大于字"的比例
         tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, sp(a, 16f));
         tv.setTextColor(BROWN);
         tv.setIncludeFontPadding(false);
         // 必须居中：标签宽度会被 PlayerActivity.equalLabelWidth 钉成三字宽，
         // TextView 默认左对齐的话，两个字的标签就从格子左缘起笔，
-        // 整体左移半个字，跟上面的图标对不齐（用户反馈过）。
+        // 整体左移半个字，跟上面的图标对不齐。
         tv.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -316,10 +316,9 @@ public final class Ui {
 
     /**
      * 中部浮层的下边距比例（Gravity.BOTTOM 基准，bottomMargin = 屏高 × 此值）。
-     * 值越大越靠上。原来 0.26 → 浮层中心约 70% 屏高（中下部）。
-     * 用户要求"往上提到与载入卡片差不多的位置"：载入卡片是 Gravity.CENTER
-     * （正中 50%），这里取 0.40 → toast 与载入卡片同在中部区域（具体中心百分比随
-     * 浮层高度/机型变化，见 AGENTS.md 的真机实测，别在代码里写死数字）。
+     * 值越大越靠上。这里取 0.40，让 toast 落在中部区域，与 Gravity.CENTER
+     * 的载入卡片接近（具体中心百分比随浮层高度/机型变化，见 AGENTS.md 的真机实测，
+     * 别在代码里写死数字）。
      * toast（新建/复用两条路径）与恢复询问条 showRestorePrompt 共用这一个值，别写死多处。
      */
     public static final float TOAST_BOTTOM_RATIO = 0.40f;
@@ -328,7 +327,7 @@ public final class Ui {
      * 反色浮层（toast / 载入卡片 / 恢复条）的底色。
      * BROWN 纯色太深太实，用半透明让浅色谱面透出一点 → 视觉上变浅、也轻透，
      * 一个参数同时满足"浅一点 + 透明一点"。
-     * alpha：0.86 起步，用户嫌还不够透 → 0.78。
+     * alpha 取 0.78：让浅色谱面透出一点，同时保住奶油字的对比。
      * 别再往下压太多：奶油字靠不透明底色衬托，太透会和谱线糊在一起看不清。
      * 金边 GOLD_LIGHT 与奶油字 SHEET_BG 仍不透明，保证在浅底/谱线上对比清晰。
      */
@@ -353,9 +352,8 @@ public final class Ui {
                 if (existing == null) {
                     tv = new TextView(a);
                     // 配色：**反色浮层** —— 半透明棕底 + 奶油字 + 金色细边。
-                    // 原来底是 #FDF8E6、和谱面 #FFFCE8 几乎同色，只靠 2dp 棕边
-                    // 区分，浮层感全无。
-                    // 底色从 BROWN 纯色改为 FLOAT_BG（BROWN@0.78 半透明）
+                    // 底色用 FLOAT_BG（BROWN@0.78 半透明），浅色谱面能透出一点；
+                    // 不用接近谱面底色的实色，否则只靠描边区分，浮层感不足。
                     // 浅一点、透一点；字与金边仍不透明，对比不丢。色值都在现有色板内。
                     tv.setTextColor(SHEET_BG);
                     tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, floatSp(a, 21f));
@@ -491,8 +489,8 @@ public final class Ui {
     // ---------------- 浮层统一件 ----------------
 
     /**
-     * 「不可用」的**唯一**透明度。原来顶栏 0.35、进度条/下一曲 0.4、
-     * 成绩卡结算期/返回箭头 0.45、底栏靠改颜色，一套界面四种灰。
+     * 「不可用」的**唯一**透明度。顶栏、进度条/下一曲、成绩卡结算期、返回箭头
+     * 全部走这一套，避免同一套界面出现多种灰。
      */
     public static final float DISABLED_ALPHA = 0.40f;
 
@@ -545,8 +543,8 @@ public final class Ui {
 
     /**
      * 无底色按钮（顶栏圆钮、返回箭头）的按下反馈：按下时浮一层很淡的棕圆角底，
-     * 松开立刻消失。原来只有底栏 4 个自绘按钮有 isPressed() 反馈，其余点上去
-     * 毫无动静。
+     * 松开立刻消失。底栏 4 个自绘按钮自带 isPressed() 反馈；其余无底色按钮
+     * 也要有这一层按下反馈，否则点上去没有动静。
      */
     public static void pressHighlight(Activity a, View v) {
         GradientDrawable on = new GradientDrawable();
@@ -599,7 +597,7 @@ public final class Ui {
         b.setBackground(sld);
         int p = floatDp(a, compact ? 10 : 12);
         b.setPadding(p, p, p, p);
-        // 最小可点高度：手机上原来只有 ~24dp 物理高，抬到 ~45dp
+        // 最小可点高度：手机上 ~24dp 物理高太难点中，这里统一抬到 ~45dp
         b.setMinHeight(floatDp(a, compact ? 48 : 56));
         // 最小宽度：两字按钮（「取消」「恢复」）如果按内容收窄，24dp 圆角会把它
         // 画成一颗圆豆，跟成绩卡那三颗药丸不像一套。给了下限就是同一形状。

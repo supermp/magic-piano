@@ -126,8 +126,7 @@ public class HomeActivity extends Activity {
     private int mNavIndex = NAV_RECENT;
     /** 曲集分类下当前选中的标签下标（每个分类各自记，切回来不重置） */
     private final java.util.HashMap<String, Integer> mTagIndex = new java.util.HashMap<>();
-    /** 收藏页当前页签：乐曲 / 曲集 */
-    /** 收藏页当前页签（默认曲集：页签顺序已改成曲集在前） */
+    /** 收藏页当前页签（乐曲 / 曲集；默认曲集，页签顺序曲集在前） */
     private int mFavTab = FAV_ALBUMS;
     /** 搜索结果页当前页签：0 = 曲集，1 = 乐曲 */
     private int mSearchTab = 0;
@@ -216,9 +215,8 @@ public class HomeActivity extends Activity {
         // 导航整体从 158dp 下移到 ~232dp（搜索框 36 + 间距），牌列能被 navScroll 滚。
         mNavBox.setPadding(0, Ui.dp(this, 20), 0, Ui.dp(this, 10));
 
-        // 宽 200dp（左栏 276 减左右各 38），比原来 248dp 收窄一截 ——
-        // 248dp 时它几乎顶满左栏、又紧贴下面的导航牌，观感很挤（用户原话"太宽了
-        // 又和下面贴那么近"）。收窄后中心与导航牌对齐，上下也留出呼吸。
+        // 宽 200dp（左栏 276 减左右各 38）：再宽（如 248dp）会几乎顶满左栏、
+        // 又紧贴下面的导航牌；当前宽度让中心与导航牌对齐，上下也留出呼吸。
         // 32dp 的胶囊在真机上"太矮、不好点"：
         // 高度提到 40dp，触控面积和多出来的 8dp 上边距抵消，导航牌位置基本不动。
         LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(
@@ -226,8 +224,8 @@ public class HomeActivity extends Activity {
         swLp.leftMargin = Ui.dp(this, 38);
         swLp.rightMargin = Ui.dp(this, 38);
         swLp.topMargin = Ui.dp(this, 120);
-        // 与下面 8 张导航木牌（renderNav 里 Ui.dp(this, 42)）等高，
-        // 原来 40dp 差 2dp，横屏下两列并排看得出不齐。
+        // 与下面 8 张导航木牌（renderNav 里 Ui.dp(this, 42)）等高；
+        // 低 2dp（如 40dp）时横屏下两列并排会看出不齐。
         left.addView(buildSearchBar(42), swLp);
 
         ScrollView navScroll = new ScrollView(this);
@@ -338,8 +336,8 @@ public class HomeActivity extends Activity {
             final boolean sel = (i == mNavIndex) && !mSearchMode;
 
             // 本地入口（最近打开 / 我的收藏）与曲集分类之间插一条分组饰件。
-            // 项本身两种都用同一块木牌 —— 之前把前两项做成"纸签"，实机看着单薄、
-            // 跟木牌不搭（用户否掉了），只保留这条分隔来表达"这是两组东西"。
+            // 两组都用同一块木牌；不要给前两项单独换成"纸签"，实机看着单薄、
+            // 跟木牌不搭，只用这条分隔表达"这是两组东西"。
             if (i == NAV_CATALOG) mNavBox.addView(navDivider(), dividerParams());
 
             TextView t = new TextView(this);
@@ -424,7 +422,7 @@ public class HomeActivity extends Activity {
                 Ui.dp(this, 120), LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = Ui.dp(this, 100);
         // 两边现在都是木牌，上下各 20/16dp：比牌与牌之间的 17dp 松一点，
-        // 但不会空出一大块（之前配"纸签"时是 30/18，太散了）
+        // 但不要放大到 30/18，否则中间会空出一大块。
         lp.topMargin = Ui.dp(this, 16);
         lp.bottomMargin = Ui.dp(this, 14);
         return lp;
@@ -759,7 +757,7 @@ public class HomeActivity extends Activity {
         mTopArea.removeAllViews();
 
         // 标签用**流式换行**（名家有 19 个，一行放不下就该换行，横向滚动没必要）。
-        // 但"流行"这一类正好 8 个，原来的 14sp + 左右 12dp 内边距会差一点点，
+        // 但"流行"这一类正好 8 个，14sp + 左右 12dp 内边距会差一点点，
         // 把「网络流行(14)」挤到第二行。这里只收尺寸、不改结构：
         //   字号 14→13（选中 16→15）、左右内边距 12→6dp、项间距 4→10dp。
         // 实测 8 个标签在一行内还留了余量。
@@ -801,7 +799,7 @@ public class HomeActivity extends Activity {
 
     /**
      * 左栏搜索框（牌匾下方）：放大镜 + 输入框 + ✕。
-     * 输入即切到「搜索结果」页；清空立刻回到原来的分类页。
+     * 输入即切到「搜索结果」页；清空立刻回到分类页。
      */
     private View buildSearchBar(int heightDp) {
         LinearLayout bar = new LinearLayout(this);
@@ -1457,12 +1455,12 @@ public class HomeActivity extends Activity {
     }
 
     /**
-     * 乐曲行副标题「曲集名｜作曲家」。曲集前置是 的要求；
-     * 分隔符用**全角细竖线**「｜」（单字符，比原来的「 · 」= 空格+点+空格 更窄，
+     * 乐曲行副标题「曲集名｜作曲家」。曲集在前是既定要求；
+     * 分隔符用**全角细竖线**「｜」（单字符，比「 · 」= 空格+点+空格更窄，
      * 不占额外宽度），由 {@link #linkAlbumName} 单独上金色，成为一条精致的界线。
      *
-     * ⚠ 要凸显的是**作曲家**（深棕 + 斜体），不是曲集名：曲集名保持原来的链接
-     * 样式（主棕 + 下划线）即可，别再加深/加粗 —— 用户纠正过。
+     * ⚠ 要凸显的是**作曲家**（深棕 + 斜体），不是曲集名：曲集名保持主棕 +
+     * 下划线的链接样式即可，别再加深/加粗。
      * span[0..1] 是曲集名区间；分隔符与作曲家区间由 linkAlbumName 按"紧跟
      * 曲集名的那个『｜』"推算，调用方不必多传参数。
      *
@@ -1502,7 +1500,7 @@ public class HomeActivity extends Activity {
         if (alb == null || span[0] < 0 || span[1] <= span[0]) return;
         SpannableString text = new SpannableString(a.getText());
         if (span[1] > text.length()) return;
-        // 曲集名：维持原来的链接样式（主棕 + 下划线），**不加粗、不加深**。
+        // 曲集名：主棕 + 下划线链接样式，**不加粗、不加深**。
         text.setSpan(new ForegroundColorSpan(Ui.BROWN), span[0], span[1],
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new UnderlineSpan(), span[0], span[1],
@@ -1546,7 +1544,7 @@ public class HomeActivity extends Activity {
                         return true;
                     }
                 }
-                // 没点在曲集名上：交回给整行，行为与加链接之前一致
+                // 没点在曲集名上：交回给整行，仍触发行点击。
                 if (Math.abs(dx) <= slop && Math.abs(dy) <= slop) row.performClick();
             }
             return true;   // CANCEL / 其它：自己收掉，别让父行误判成点击
@@ -1627,8 +1625,7 @@ public class HomeActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         wlp.leftMargin = Ui.dp(this, 10);
         // 时间文字在心形的**左边**：要拉开两者距离必须设 rightMargin。
-        // 之前误改成 leftMargin 24dp（拉的是它与曲名的距离，和心毫无关系），
-        // 纠正：恢复 leftMargin 10dp，真正的间距放到 rightMargin。
+        // 设 leftMargin 只会拉开它与曲名的距离，和心形毫无关系；当前间距用 rightMargin。
         wlp.rightMargin = Ui.dp(this, 10);
         r.addView(when, wlp);
 
@@ -1685,9 +1682,9 @@ public class HomeActivity extends Activity {
                 //   [--ez selffeed true] [--ez autotrial true] [--ei startm M ...]
                 // 带 enc 时直接进播放页，省去在界面里点（演示/回归用）
                 String enc = getIntent().getStringExtra(PlayerActivity.EXTRA_ENC);
-                // 曲名要一起转过去：之前只传 enc，播放页拿不到目录名就退回解 XML，
-                // 于是「刚刚好」被 XML 里残留的 work-title 显示成「一生有你」，
-                // 排查时误以为是曲库数据错了。
+                // 曲名要一起转过去：只传 enc 时播放页拿不到目录名就退回解 XML，
+                // 「刚刚好」就会被 XML 里残留的 work-title 显示成「一生有你」，
+                // 排查时容易误以为是曲库数据错了。
                 if (enc != null && !enc.isEmpty()) {
                     open(enc, getIntent().getStringExtra(PlayerActivity.EXTRA_TITLE));
                 }
