@@ -1,7 +1,7 @@
 #!/bin/bash
 # 免 Gradle 的极简 APK 构建：javac -> jar -> d8 -> aapt2 -> zipalign -> apksigner
-# 注意 pipefail：下面大量 `... | tail` 会把被管命令的退出码吞掉（aapt2 报错时
-# 也曾因此产出 0 字节 APK 还打印"完成"），必须让管道失败也能让脚本停下。
+# 注意 pipefail：下面大量 `... | tail` 会把被管命令的退出码吞掉，
+# aapt2 报错时必须让管道失败停下，不能产出 0 字节 APK 还打印"完成"。
 set -e
 set -o pipefail
 
@@ -25,7 +25,11 @@ JAVA="$JAVA_HOME/bin/java.exe"
 PY="${PYTHON:-python3}"
 
 cd "$(dirname "$0")"
-echo "=== [0/6] 清理 ==="
+echo "=== [0/6] 清理与补丁校验 ==="
+# 渲染器补丁靠字符串替换，锚点缺失会让 buildHtml 抛异常、播放页空白；
+# 先校验 app/assets/sheetShow 的锚点，缺失直接中止构建。
+"$PY" "$ROOT_DIR/tools/check_sheet_patches.py"
+
 # 刻意不做 `rm -rf build`：沙箱会拦截批量删除，而且 build/ 里全是本脚本的产物，
 # 每一步（javac / d8 / aapt2 / zipalign / apksigner）都是整文件覆盖，留着旧的
 # 无害。唯一副作用：删掉某个 .java 后，它上次编译出的 .class 还会被 dex 进去

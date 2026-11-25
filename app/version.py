@@ -18,17 +18,16 @@ versionCode / versionName 的取值：**YYMMDDNNN**（9 位）。
 例：11 月 11 日第 3 次构建 → versionCode `261111003`，versionName `20261111`。
 
 versionName 只是给人看的：Android 的升级判据只有 versionCode，两者同源派生，
-不存在「改了 name 但 code 没变、设备不装」的情况（旧版写死 `0.4` 时正是这个缺陷）。
+避免「改了 name 但 code 没变、设备不装」。
 
 ⚠ 两条硬约束决定了位数，别随手改：
   1. Android versionCode 是 int32，上限 2147483647；实测 aapt2 对 11 位的
      `20261111004` 直接报 `invalid android:versionCode`。8 位完整日期 + 3 位
      序号装不下，只能把年份缩成 YY。
-  2. 8 位的 `YYMMDDNN`（26111101 = 2611 万）比旧方案的 9 位单调计数器
-     （215696510 = 2.15 亿）**小**。实测 `adb install -r -d` 也被系统拒绝
-     （INSTALL_FAILED_VERSION_DOWNGRADE），新包根本装不上，除非卸载（会丢
-     设备上的曲库与存档）。9 位日期码（261111001 = 2.61 亿）天然大于旧值，
-     是一次正常升级。→ 序号取 3 位（正好是用户最初设想的"后面三位"）。
+  2. 8 位的 `YYMMDDNN` 只有 2600 万级，可能小于设备上已有的 9 位 versionCode；
+     实测 `adb install -r -d` 会被系统拒绝
+     （INSTALL_FAILED_VERSION_DOWNGRADE），新包装不上，除非卸载（会丢设备上的
+     曲库与存档）。9 位日期码 `YYMMDDNNN` 是 2.6 亿级，能保证升级。→ 序号取 3 位。
 
 为什么仍要 `version-code.txt`：记 `<code> <内容hash前16位>`，保证
 "同源码重编不产生新版本"（可复现）、"内容真的变了才递增 NN"：
@@ -38,14 +37,14 @@ versionName 只是给人看的：Android 的升级判据只有 versionCode，两
   · NNN 到 999 → **直接报错**，绝不回绕（回绕会让设备判成"降级"而拒装）
   · 新 code 不比上次大（系统时间回拨）→ 同样报错，防止悄悄降级
 
-旧方案是 9 位单调计数器（215696510），状态文件里不是合法日期码 →
-第一次 bump 直接按今天第 1 次生成；新值比旧值大，`sync_devices.py` 走正常
-升级路径，不需要任何迁移分支或用户数据搬迁。
+状态文件不是合法日期码时没有可比较的单调基准：第一次 bump 直接按今天第 1 次
+生成；日期码数值更大，`sync_devices.py` 走正常升级路径，不需要迁移分支或
+用户数据搬迁。
 
 参与 hash 的只有**决定产物内容**的东西：src / assets / res / lib /
 AndroidManifest.xml / build.sh / pack.py，以及 **version.py 自身**
 （版本规则变了也必须涨号，否则「名称变了、code 没变」，设备不会更新）。
-构建期生成的中间产物（如历史上那个 assets/filelist.txt）不参与。
+构建期生成的中间产物不参与。
 
 用法：
   python version.py bump    # 内容变了就 +1 并写回 version-code.txt（**build.sh 用这个**）
@@ -120,7 +119,7 @@ def read_counter():
 
 
 def is_date_code(code):
-    """9 位 YYMMDDNNN，且月/日/序号合法。旧计数器码（215696510 → 月=56）为 False。"""
+    """9 位 YYMMDDNNN，且月/日/序号合法；非日期码返回 False。"""
     if code <= 0 or len(str(code)) != 9:
         return False
     s = str(code)
@@ -132,8 +131,8 @@ def resolve_code(digest, write):
     """同一份内容复用上次的 code；内容变了就取当天下一个序号。write=False 只读。"""
     last, last_head = read_counter()
     head = digest[:16]
-    # 只有"上次已经是日期码且内容没变"才复用。旧计数器码即使 hash 相同也要换掉，
-    # 否则格式永远迁移不过去。
+    # 只有"上次已经是日期码且内容没变"才复用。非日期码即使 hash 相同也要换掉，
+    # 否则日期码格式不会生效。
     if is_date_code(last) and last_head == head:
         return last
     today_prefix = int(datetime.date.today().strftime('%y%m%d')) * 1000
@@ -145,8 +144,8 @@ def resolve_code(digest, write):
         raise SystemExit('今天的构建序号已满（%d 次）：等明天或人工处理，绝不回绕'
                          % MAX_SEQ)
     code = today_prefix + seq
-    # 旧计数器码迁移到日期码时数值必然变小，那是预期的一次性迁移；
-    # 除此以外"新码 <= 旧码"只可能是系统时间回拨，必须拦住。
+    # 非日期码没有可比较的单调基准，首次生成直接写日期码；
+    # 日期码之间出现"新码 <= 旧码"只可能是系统时间回拨，必须拦住。
     if is_date_code(last) and code <= last:
         raise SystemExit('新 versionCode %d 不大于上次的 %d（系统时间回拨？），拒绝生成'
                          % (code, last))

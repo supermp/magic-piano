@@ -256,7 +256,7 @@ public final class Ui {
         Bitmap hit = COVERS.get(key);
         if (hit != null && !hit.isRecycled()) return hit;
 
-        // 外部专属目录（与乐谱同位置）优先，内部存储兼容旧导入
+        // 外部专属目录（与乐谱同位置）优先，内部存储作为兼容位置
         File extDir = a.getExternalFilesDir(null);
         File f = null;
         if (extDir != null) f = new java.io.File(new java.io.File(extDir, "covers"),

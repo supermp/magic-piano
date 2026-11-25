@@ -94,6 +94,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - 文件名用 versionName，同一天多次构建会重名覆盖；先后只能看 versionCode（见「版本号」）。
 - 开发资产包 `dist/magicpiano-runtime-assets.zip`（文件名固定）解压到仓库根目录，再生成图片、构建。
 - 交付物统一放 `dist/`；`deploy.py` / `sync_devices.py` 默认取最新的 `magicpiano-*.apk`（可用 `--apk` 指定）。
+- `build.sh` 开头先跑 `tools/check_sheet_patches.py`；`SheetView` 对渲染器的字符串补丁锚点缺失会直接中止构建。
 - 改 Java 后必须全量重编。`build.sh` 会清理旧 class，避免隐式编译留下失效类。
 - 改 `app/assets/algo_assets/**` 后同时递增 `AppAssets.VERSION`，否则设备仍使用已解压的旧副本。
 - `app/version-code.txt` 由版本脚本维护，不入库。
@@ -153,7 +154,7 @@ python tools/deploy.py --apk-only --serial <serial>
 - 会话代数 `sGen` 必须贯通建会话、喂音、停止与放弃；`alive(myGen)` 同时检查运行态和代数。
 - native handler 归属单独由 `sHandlerGen` 记录，不能用 stop 自己产生的新代数代替 handler 代数。
 - `sListener/mRec/mFeedThread` 等静态引用在锁内快照、校验归属后清理；旧线程不得碰新会话资源。
-- 建会话取消或失败在同一引擎任务的 `finally` 内释放本代 handler并恢复预览，调用线程不再直接补做 native 清理。
+- 建会话取消或失败在同一引擎任务的 `finally` 内释放本代 handler 并恢复预览，调用线程不要直接补做 native 清理。
 - `onStop/onDestroy` 使用带 owner 的 `abandon()`；建会话在途时也不能只靠 `isRunning()` 判断。
 
 ### 试听与演奏行为
@@ -179,6 +180,8 @@ python tools/deploy.py --apk-only --serial <serial>
   node -e "new Function(require('fs').readFileSync('app/assets/sheetShow/sheet_show.js','utf8'))"
   ```
 
+- 改 `sheet_show.js` / `sheet_show.html` 后还要跑 `python tools/check_sheet_patches.py`；`build.sh` 每次构建也会先跑，锚点缺失直接失败。`buildHtml` 运行期未命中同样直接抛错（不是只打日志）。
+- 改 `buildHtml` 里的补丁匹配串时同步更新 `tools/check_sheet_patches.py` 的 `PATCHES` 清单，否则构建期校验查的仍是旧锚点、照样通过，直到启动时才以空白页暴露。
 - Java→JS 明文 JSON 在桥接前保护 `%`，避免原桥 `decodeURIComponent` 抛 `URIError`；UTF-8 使用 `TextDecoder`。
 - 光标统一使用 `#sheet-cursor-preview` 金色胶囊；只有一套位置状态和一条阅读存档。
 - 渲染器恒为 preview 模式；演奏态由 Java `mPerformMode` 控制整小节高亮（命中标记另走结果接口），不切 magic、不重绘。

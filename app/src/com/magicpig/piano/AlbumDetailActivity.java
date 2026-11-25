@@ -105,8 +105,8 @@ public class AlbumDetailActivity extends Activity {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         left.setGravity(Gravity.CENTER_HORIZONTAL);
-        // 56dp 是给原来那个文字「←」留的高度；换成原版手绘箭头（墨迹到 67dp）
-        // 后会压住封面，所以顶距加到 88dp（箭头下沿 67 + 21dp 间距）
+        // 顶部留 88dp：原版手绘箭头墨迹到 67dp，箭头下沿与封面再留 21dp。
+        // 文字「←」只有 56dp 高，按它留空间会被箭头压住封面。
         left.setPadding(Ui.dp(this, 20), Ui.dp(this, 88), Ui.dp(this, 20), Ui.dp(this, 16));
         final int leftW = Ui.dp(this, 300);
         // 封面框必须是正方形：父容器左右各有 20dp 内边距，直接给 leftW 会被
@@ -254,8 +254,8 @@ public class AlbumDetailActivity extends Activity {
 
         mList = new LinearLayout(this);
         mList.setOrientation(LinearLayout.VERTICAL);
-        // 右侧留白 12dp：心形放大到 42dp 后，原来的 6dp 让滚动条几乎贴着心形。
-        // 这里加的 6dp 必须同步加到上面的表头右留白，否则页码列会错位。
+        // 右侧留白 12dp：6dp 会让滚动条几乎贴着 42dp 心形，多出的 6dp 必须同步加到
+        // 上面的表头右留白，否则页码列会错位。
         mList.setPadding(0, 0, Ui.dp(this, 12), 0);
         ScrollView sv = new ScrollView(this);
         // 滚动条要，但不能压在心形上（会误点）。两个手段配合：
@@ -286,8 +286,8 @@ public class AlbumDetailActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // 左上返回：用原版那张手绘棕箭头（btn_library_back_arrow.png），
-        // 和播放页、曲谱页是同一个素材。之前这里是一个文字「←」，
-        // 字号/笔触都跟这套手绘界面不搭，显得像系统控件。
+        // 和播放页、曲谱页是同一个素材。文字「←」的字号/笔触跟这套手绘界面不搭，
+        // 这里用原版手绘箭头。
         ImageView back = new ImageView(this);
         Bitmap arrow = Ui.assetBitmap(this, "btn_library_back_arrow.png");
         if (arrow != null) {

@@ -317,11 +317,18 @@ public class SheetView extends WebView {
         }
     }
 
-    /** 把 jsbridge.js 与 sheet_show.js 内联进 HTML */
+    /**
+     * 把 jsbridge.js 与 sheet_show.js 内联进 HTML。
+     *
+     * ⚠ 下面每个补丁的匹配串都是对渲染器压缩代码的**原位字符串替换**。改这些串时必须同步
+     * `tools/check_sheet_patches.py` 的 PATCHES 清单，否则构建期查的仍是旧锚点、照样通过，
+     * 直到启动时才以空白页 + 异常暴露。
+     */
     private static String buildHtml(Context ctx) throws Exception {
         String html = readAsset(ctx, "sheetShow/sheet_show.html");
         String bridge = readAsset(ctx, "sheetShow/jsbridge.js");
         String app = readAsset(ctx, "sheetShow/sheet_show.js");
+        java.util.List<String> missed = new java.util.ArrayList<>();
 
         // ---- 修「重绘后光标永久消失」的渲染器 bug ----
         // 渲染器的光标元素是惰性创建并缓存引用的：
@@ -341,6 +348,8 @@ public class SheetView extends WebView {
                     "x.cursorPreview||((x.cursorPreview=document.createElementNS(i,\"g\"))",
                     "(x.cursorPreview&&!document.contains(x.cursorPreview)&&(x.cursorPreview=null)),"
                             + "x.cursorPreview||((x.cursorPreview=document.createElementNS(i,\"g\"))");
+        } else {
+            missed.add("光标重建");
         }
         Log.i(TAG, "光标补丁 " + (litIdx >= 0 ? "已应用" : "未命中（JS 结构变了？）"));
 
@@ -371,6 +380,7 @@ public class SheetView extends WebView {
             Log.i(TAG, "首行 top 滚动补丁已应用（不再顶掉 firstRowY 留白）");
         } else {
             Log.w(TAG, "首行 top 滚动补丁未命中（JS 结构变了？）");
+            missed.add("首行 top 滚动");
         }
 
         // ---- 补丁：moveCursor2 支持 wb_no_scroll（本次只挪光标、不滚视口）----
@@ -390,6 +400,7 @@ public class SheetView extends WebView {
             Log.i(TAG, "光标不滚动补丁已应用（wb_no_scroll）");
         } else {
             Log.w(TAG, "光标不滚动补丁未命中（JS 结构变了？）");
+            missed.add("moveCursor2 wb_no_scroll");
         }
 
         // ---- 补丁：给"非强制自动滚动"加一个可冻结开关 ----
@@ -418,8 +429,10 @@ public class SheetView extends WebView {
                     + "<1e3*u.GlobalState.shareInstance.doNotScrollAfterTouchActiveSecond)";
             app = app.replace(autoScrollKey, autoScrollNew);
             Log.i(TAG, "自动滚动冻结补丁已应用（命中 " + hits + " 处：scrollTo / scrollToScreenPosition）");
+            if (hits != 2) missed.add("自动滚动冻结（需要 2 处，实到 " + hits + "）");
         } else {
             Log.w(TAG, "自动滚动冻结补丁未命中（JS 结构变了？）");
+            missed.add("自动滚动冻结");
         }
 
         // ---- 补丁：逐行绘制改用 setTimeout 调度，给外部 JS 注入留缝隙 ----
@@ -438,6 +451,7 @@ public class SheetView extends WebView {
             Log.i(TAG, "渲染调度补丁已应用（MessageChannel → setTimeout，交互 JS 可插队）");
         } else {
             Log.w(TAG, "渲染调度补丁未命中（JS 结构变了？）");
+            missed.add("渲染调度");
         }
 
         // ---- 补丁：把"每批行画完"转发给 Java ----
@@ -467,6 +481,7 @@ public class SheetView extends WebView {
             Log.i(TAG, "分批绘制回调补丁已应用（带当前小节进度）");
         } else {
             Log.w(TAG, "分批绘制回调补丁未命中（JS 结构变了？）");
+            missed.add("分批绘制回调");
         }
 
         // ---- 补丁：速度记号（Andantino ♩=70 这类）上移，避开连音线 ----
@@ -484,6 +499,7 @@ public class SheetView extends WebView {
             Log.i(TAG, "速度记号上移补丁已应用（-30 单位）");
         } else {
             Log.w(TAG, "速度记号上移补丁未命中（JS 结构变了？）");
+            missed.add("速度记号上移");
         }
 
         // ---- 补丁：结果只画红叉，符头一律黑色 ----
@@ -504,6 +520,7 @@ public class SheetView extends WebView {
                         + (RESULT_MARK_STYLE == 2 ? "（不画符号）" : "（只画红叉）"));
             } else {
                 Log.w(TAG, "结果符号补丁未命中：JS 结构变了？");
+                missed.add("结果符号");
             }
         }
 
@@ -523,12 +540,21 @@ public class SheetView extends WebView {
             Log.i(TAG, "符头色板补丁已应用（全黑）");
         } else {
             Log.w(TAG, "符头色板补丁未命中（JS 结构变了？）");
+            missed.add("符头色板");
         }
 
         // 谱线粗细：渲染器的 magic 模式会把谱线/小节线的描边压到 0.5px。
         // 本页恒 preview，但 CSS 仍显式锁 1px，避免以后误切 mode 时线变虚
         // （CSS 优先于 SVG presentation attribute，规则加在下面注入的样式表里）。
         Log.i(TAG, "谱线粗细规则随样式表注入");
+
+        // 页面骨架的三个拼接锚点。缺任何一个都会让 buildHtml 抛异常、播放页空白；
+        // 构建期由 tools/check_sheet_patches.py 先校验，这里再做一次启动期兜底。
+        if (!html.contains("<head>")) missed.add("HTML <head>");
+        if (!html.contains("<script type=\"text/javascript\" src=\"sheet_show.js\"></script>")) {
+            missed.add("HTML 渲染器脚本");
+        }
+        if (!html.contains("</head>")) missed.add("HTML </head>");
 
         html = html.replace("<head>", "<head>" + HELPER_JS + "<script>" + bridge + "</script>");
         html = html.replace(
@@ -610,6 +636,10 @@ public class SheetView extends WebView {
                 + "body[data-hand=\"left\"] [id^=\"vf-measuresRow-\"][id$=\"-1\"].vf-staveCell.vf-staveCell"
                 + " .vf-grace-note path{fill:#C4C4C4;stroke:#C4C4C4;}"
                 + "</style>");
+        if (!missed.isEmpty()) {
+            throw new IllegalStateException("曲谱渲染补丁未命中：" + missed
+                    + "；检查 app/assets/sheetShow 与 buildHtml 的字符串锚点");
+        }
         return html;
     }
 

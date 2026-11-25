@@ -117,8 +117,8 @@ public class MainActivity extends Activity {
     /**
      * 设备上第一个可用的曲谱包（外部专属目录优先，与 {@link SheetFetcher} 的查找顺序一致）。
      *
-     * 探针原来写死了某首曲子的 uuid：曲库一更新、那首被下架就再也跑不通，而且只查
-     * 内部存储，找不到实际铺在外部目录里的曲库。改成"设备上有哪首就用哪首"。
+     * 探针不写死曲谱 uuid：曲库更新或下架后就会失效；也不只查内部存储，
+     * 否则找不到铺在外部目录里的曲库。按设备上实际存在的第一个谱包取。
      */
     private File firstSheetEnc() {
         File ext = getExternalFilesDir(null);
@@ -453,8 +453,8 @@ public class MainActivity extends Activity {
     }
 
     private Object stepGetSheet() throws Exception {
-        // 原来走 magicPianoGetSheetContent（magicPiano 模块已移除，那个调用会失败）；
-        // 改为取引擎里已解密的整曲 XML。
+        // magicPianoGetSheetContent 依赖已移除的 magicPiano 模块，不能再调；
+        // 这里取引擎里已解密的整曲 XML。
         String xml = AlgoEngine.get().getSheetXml();
         if (xml == null) return "getSheetXml() = null（引擎还没打开曲谱？）";
         File f = new File(filesDir, "decrypted.xml");

@@ -9,9 +9,8 @@ import java.util.regex.Pattern;
  * 数据来自 {@link UfpTrial} 收尾时 native 的评测 JSON（ufpFinish 的返回），
  * 只取其中的 {@code rating} 段。
  *
- * 之前界面显示的是 {@code UninterruptibleFollowStatus.score}（实时分），
- * 实测它在任何场景下都恒为 100（连故意喂错音都不掉），没有信息量。
- * 真正有区分度的是 JSON 里的 rating 段：
+ * 实时分 {@code UninterruptibleFollowStatus.score} 没有信息量：实测它在任何
+ * 场景下都恒为 100（连故意喂错音都不掉）；成绩直接取 JSON 里的 rating 段：
  *
  * <pre>
  * "rating": { "pitch": 100, "pitchWrong": 0, "rhythm": 100, "speed": 100, "total": 100 }
@@ -35,7 +34,7 @@ final class EvalRating {
         this.total = total;
     }
 
-    /** 解析失败（没评测 JSON / 字段缺失）返回 null，调用方退回旧显示。 */
+    /** 解析失败（没评测 JSON / 字段缺失）返回 null，调用方退回默认显示。 */
     static EvalRating parse(String evaJson) {
         if (evaJson == null) return null;
         int b = evaJson.indexOf("\"rating\"");

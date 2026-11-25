@@ -192,13 +192,12 @@ public class HomeActivity extends Activity {
 
         // ---- 左栏：羊皮纸侧栏底板 + 分类导航 ----
         // 尺寸以"原版 App 跑在本机 2560×1440/360dpi 的实拍截图"为准（1dp=2.25px）：
-        //   侧栏右边界 622px -> 276dp（此前按 960×540 缩略图读成 380dp，宽了 104dp）
+        //   侧栏右边界 622px -> 276dp
         //   导航牌 185..548px -> 左缩进 82.2dp、宽 161.8dp、高 42.2dp
         //   牌间距 44px -> 19.6dp；首牌顶边 402px -> 178.7dp
         //   选中牌右移 16dp；文字墨高 43px -> 19.1dp
-        // 注意：早期那批 960×540 的原版截图是"另一个逻辑尺寸"下拍的
-        // （1 截图 px≈0.667dp，不是 1.185dp），不能直接换算成本机 dp —— 这是
-        // 前几轮尺寸一直调不准的根因。
+        // 注意：960×540 的原版截图在另一逻辑尺寸下拍摄（1 截图 px≈0.667dp，
+        // 不是 1.185dp），不能直接换算成本机 dp。
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         // 原 APK 的 bg_library_navbar.png（552×1125，3.0x）：浅羊皮纸纹理、
@@ -208,9 +207,9 @@ public class HomeActivity extends Activity {
 
         mNavBox = new LinearLayout(this);
         mNavBox.setOrientation(LinearLayout.VERTICAL);
-        // 176dp 是照原版首牌位置定的，但那会儿没有分组饰件；加上分隔线后整列多了
-        // 约 52dp，底牌离下边框只剩 ~32dp 了。这里上移 18dp（176→158）：
-        // 牌匾下方留 23dp、底牌下方留 ~50dp，上下都不挤。
+        // 176dp 是原版首牌位置；加上分组饰件后整列多了约 52dp，底牌离下边框只剩
+        // ~32dp。这里上移 18dp（176→158）：牌匾下方留 23dp、底牌下方留 ~50dp，
+        // 上下都不挤。
         // 牌匾浮在 y=40..178dp，所以导航从下面开始；搜索框插在牌匾与导航之间。
         // 导航整体从 158dp 下移到 ~232dp（搜索框 36 + 间距），牌列能被 navScroll 滚。
         mNavBox.setPadding(0, Ui.dp(this, 20), 0, Ui.dp(this, 10));
@@ -299,8 +298,8 @@ public class HomeActivity extends Activity {
         // 新版是羊皮纸横幅（见 tools/gen_library_title.py），图片内容在 924×399
         // 画布内水平居中，所以只要把**视图**居中对准侧栏（276dp）即可：
         //   leftMargin = 276/2 - 319/2 = -21.5dp
-        // 这样横幅视觉中心与侧栏中心重合，左右留空一致（此前 -8dp 偏右，
-        // 左侧空出一大块，用户反馈"左边留空隙比较多"）。
+        // 这样横幅视觉中心与侧栏中心重合，左右留空一致（-8dp 会让横幅偏右，
+        // 左侧空出一大块）。
         ImageView sign = new ImageView(this);
         sign.setImageBitmap(Ui.assetBitmap(this, "bg_library_title.png"));
         sign.setScaleType(ImageView.ScaleType.FIT_XY);
@@ -1484,7 +1483,7 @@ public class HomeActivity extends Activity {
 
     /**
      * 只把副标题里的**曲集名那几个字**做成链接：点它进曲集页，
-     * 点作曲家 / 行内其它地方仍然打开曲谱（父行原本的行为）。
+     * 点作曲家 / 行内其它地方仍然打开曲谱（父行的默认行为）。
      *
      * 为什么不用 ClickableSpan + LinkMovementMethod：它会把整个 TextView 变成
      * 可点击并吞掉全部触摸事件，父行的 OnClickListener 就再也收不到点击了

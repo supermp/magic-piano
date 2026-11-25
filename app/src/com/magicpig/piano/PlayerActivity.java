@@ -321,7 +321,7 @@ public class PlayerActivity extends Activity {
      * 一致）；只有 `moveCursor` 是 (measure, offset, voice)，调用时要换序。
      */
     private int[] mJumpTarget;
-    /** 取消跳转时回到的位置（发起跳转前光标所在处；-1 = 之前没定位过） */
+    /** 取消跳转时回到的位置（发起跳转前光标所在处；-1 = 尚未定位过） */
     private int mJumpBackMeasure = -1, mJumpBackVoice, mJumpBackOffset;
     /** 载入框里的「取消」按钮（只在恢复/跳转等待期间显示） */
     private TextView mLoadingCancel;
@@ -1295,7 +1295,7 @@ public class PlayerActivity extends Activity {
         // 上下留内边距把热区撑高（背景透明，看不出变化）。
         // 横向内边距这里**不能加**：标签宽度会被 equalLabelWidth 钉死，
         // 再塞左右内边距等于把文字挤压、"已收藏"就会被折成两行
-        // （曾用 dp(9) 左右内边距 + 72dp 固定宽度，实测正好挤爆）。
+        // （dp(9) 左右内边距 + 72dp 固定宽度会把「已收藏」挤成两行，横向内边距保持 0）。
         // 横向热区本来就有标签那么宽，不缺这 9dp。
         b.root.setPadding(0, dp(3), 0, dp(3));
     }
@@ -1600,7 +1600,7 @@ public class PlayerActivity extends Activity {
      * 说明已经出了段内 → 收尾。
      *
      * 不能拿 offset 和段尾比：引擎上报的是"每个音频块开头那颗音"，块与块之间还会在
-     * 左右手之间来回跳（实测 o=5/v=0 下一块变 o=2/v=4），旧写法就是这么误判的。
+     * 左右手之间来回跳（实测 o=5/v=0 下一块变 o=2/v=4），按 offset 比段尾会误判。
      * 集合判断不受跳变影响 —— 不管哪只手，在不在段内是确定的。
      */
 
@@ -1810,7 +1810,7 @@ public class PlayerActivity extends Activity {
                 // 传本页 listener：按停期间若用户已返回重进，旧页面的 stop
                 // 不能顺着静态 sListener 把新会话停掉（UfpTrial 会校验归属）。
                 // 没演奏时跳过 ufpFinish：结果本来就是空的，T618 上这一步要 3.5 秒；
-                // 有演奏但弹错音（光标没推进）旧逻辑仍要评分出红叉，现在一并静默退出。
+                // 收到声音但光标没推进也归为没演奏，同样不评分、不弹红叉。
                 final boolean skipScoring = noPlay;
                 new Thread(() -> UfpTrial.stop(mTrialListener, true, skipScoring),
                         "trial-stop").start();
@@ -1858,7 +1858,7 @@ public class PlayerActivity extends Activity {
         // 进谱时为了让曲首光标不被重绘擦掉，给 body 加过 `wb-cursor-lock`
         // （CSS visibility:visible !important）。演奏期间光标仍是同一枚胶囊，
         // 这把锁不会造成"两个光标"，但留着它会在整页重绘后把旧位置的光标钉住，
-        // 所以照旧先解掉。
+        // 所以演奏开始前先解掉。
         if (mCursorLocked && mSheet != null) {
             mCursorLocked = false;
             mSheet.unlockPreviewCursor();
@@ -2059,7 +2059,7 @@ public class PlayerActivity extends Activity {
             mTrialBtn.setUiEnabled(true);
             setTrialUi(false);
             mSheet.setPerformMode(false);
-            // 不再 hidePreviewCursor：光标只有胶囊这一套，演奏结束照旧显示它
+            // 不再 hidePreviewCursor：光标只有胶囊这一套，演奏结束仍显示它
             //（setPerformMode(false) 里会立刻把胶囊按最后位置画回来）。
         }
         updateTransportState();

@@ -212,7 +212,7 @@ public final class SheetCatalog {
     }
 
     /**
-     * 目录数据源：**只从设备存储读**（外部专属目录优先，内部存储兼容早期版本）。
+     * 目录数据源：**只从设备存储读**（外部专属目录优先，内部存储作为兼容位置）。
      *
      * 目录和乐谱、封面放在同一个位置（files/ 下），更新曲库只要换资源包，
      * 不用重打 APK。APK 里不再内置 catalog.json（核对：assets 只剩
@@ -231,7 +231,7 @@ public final class SheetCatalog {
 
     /**
      * 目录文件位置：**外部专属目录优先**（与乐谱、封面同一个位置），
-     * 内部存储作为兼容（早期版本导到过内部），都没有返回 null。
+     * 内部存储作为兼容位置；两处都没有返回 null。
      */
     private static File catalogFile(Context c) {
         File ext = c.getExternalFilesDir(null);
