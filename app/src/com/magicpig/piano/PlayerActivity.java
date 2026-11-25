@@ -2059,8 +2059,8 @@ public class PlayerActivity extends Activity {
             mTrialBtn.setUiEnabled(true);
             setTrialUi(false);
             mSheet.setPerformMode(false);
-            // 不再 hidePreviewCursor：光标只有胶囊这一套，演奏结束仍显示它
-            //（setPerformMode(false) 里会立刻把胶囊按最后位置画回来）。
+            // 光标只有胶囊一套，这里不用 hidePreviewCursor
+            //（setPerformMode(false) 会按最后位置把胶囊画回来）。
         }
         updateTransportState();
     }
@@ -2318,7 +2318,7 @@ public class PlayerActivity extends Activity {
             setTrialUi(false);
             // 只是被盖住（切后台 / 按 home）：WebView 还活着，把演奏态标志关掉，
             // 回来时按预览态继续（只动 Java 侧，不发报文、不重绘）。
-            // 光标只有胶囊一套，不用再额外"藏胶囊"。
+            // 光标只有胶囊一套，切后台不用另藏。
             if (wasTrial && !isFinishing()) {
                 mSheet.setPerformMode(false);
             }

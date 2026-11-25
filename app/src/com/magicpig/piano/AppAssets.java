@@ -44,7 +44,7 @@ public final class AppAssets {
 
         AssetManager am = ctx.getAssets();
         copyDir(am, "algo_assets", new File(files, "algo"));
-        // 曲谱不再内置、也不再下载：只从外部拷贝的 sheets 目录里读
+        // 曲谱不在 APK 内，也不下载：只从外部拷贝的 sheets 目录里读
 
         File[] old = files.listFiles();
         if (old != null) {

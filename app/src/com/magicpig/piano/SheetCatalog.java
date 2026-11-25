@@ -215,9 +215,8 @@ public final class SheetCatalog {
      * 目录数据源：**只从设备存储读**（外部专属目录优先，内部存储作为兼容位置）。
      *
      * 目录和乐谱、封面放在同一个位置（files/ 下），更新曲库只要换资源包，
-     * 不用重打 APK。APK 里不再内置 catalog.json（核对：assets 只剩
-     * algo_assets / fonts / sheetShow / ui），所以这里只从设备存储读，
-     * 不要回退到 `am.open("catalog.json")`；那只会每次多抛一次 FileNotFoundException。
+     * 不用重打 APK。catalog.json 不在 APK 内，所以只从设备存储读，
+     * 不要回退到 `am.open("catalog.json")`：那只会每次多抛一次 FileNotFoundException。
      */
     private static InputStream openCatalog(Context c) {
         File f = catalogFile(c);

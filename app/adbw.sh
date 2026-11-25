@@ -1,6 +1,6 @@
 #!/bin/bash
 # 自包含 adb 包装：起守护进程 → 等设备就绪 → 执行传入的 adb 命令
-# （沙箱会在两条命令之间回收后台进程，导致 adb daemon 每次都得重启、设备短暂 offline）
+# （后台进程可能在下一条命令前被回收，adb daemon 随之重启、设备短暂 offline）
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -f "$ROOT/local.env" ]; then
     . "$ROOT/local.env"

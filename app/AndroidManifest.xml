@@ -62,8 +62,7 @@
         <!-- 逆向探针：保留用于排查 native 链路，不设 launcher。
              exported 必须留 true —— 实测 Android 15 上 `am start`（shell uid 2000）
              启动未导出 Activity 会直接 SecurityException，探针就废了。
-             改用 DUMP 权限兜住暴露面：shell 持有 DUMP 能启动，第三方 App 没有该权限。
-             （早先只写 exported=true 无权限限制，等于任何应用都能拉起探针。） -->
+             改用 DUMP 权限兜住暴露面：shell 持有 DUMP 能启动，第三方 App 没有该权限。 -->
         <activity
             android:name="com.magicpig.piano.MainActivity"
             android:exported="true"

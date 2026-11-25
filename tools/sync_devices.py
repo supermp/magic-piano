@@ -7,9 +7,7 @@ App 的升级判据是 **versionCode** —— Android 的标准做法，PackageM
   · 设备 versionCode 从 `dumpsys package` 读
   · 设备低 → install；相等 → 跳过；设备高 → 拒绝（防降级）
 
-  版本码统一用 9 位日期码（YYMMDDNNN），序号取 3 位：8 位的 YYMMDDNN 比 9 位码
-  小，实测连 `install -r -d` 都会被系统拒绝（INSTALL_FAILED_VERSION_DOWNGRADE）。
-
+  版本码格式与位数由 app/version.py 决定（9 位日期码，序号 3 位）。
   App 的升级判据只有 versionCode，不用 APK 指纹：构建不可复现（zip 条目时间戳等），
   同一份源码重编 sha 也会变，拿它判"要不要装"只会白重装。
 

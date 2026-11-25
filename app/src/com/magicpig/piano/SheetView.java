@@ -845,7 +845,7 @@ public class SheetView extends WebView {
             // 按曲谱区高等比、夹到 [0.42, 0.70]。普通曲会多露一点第 3 行抬头，无妨。
             // 别拿 measure_row_padding_bottom 凑行数：负值只压"上一行低音谱表→下一行
             // 高音谱表"的间距，-40 才省 32 CSS，要 -100 以上才够一行，那时行间力度
-            // 记号/8va 线会叠一起（AGENTS.md §7.2 有实测表）。
+            // 记号/8va 线会叠一起。
             android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
             int hPx = getHeight();
             // 首帧可能还没布局（getHeight()==0），先用"屏高 − 两条栏"兜底；
@@ -856,7 +856,7 @@ public class SheetView extends WebView {
             final boolean compact = scoreCssH < 400f;
             double zoom;
             if (compact) {
-                // 283 CSS 是 PKB110 实测曲谱区高；0.465 对应"最宽的两行也完整"
+                // 283 CSS 是小屏实测曲谱区高；0.465 对应"最宽的两行也完整"
                 zoom = 0.465d * (scoreCssH / 283f);
                 zoom = Math.max(0.42d, Math.min(0.70d, zoom));
             } else {

@@ -766,7 +766,7 @@ public class HomeActivity extends Activity {
             final int idx = i;
             final boolean sel = (i == tagIdx);
             TextView t = new TextView(this);
-            // 标签上直接带该标签的曲集数：顶上不再单独报「共 188 本曲集 · 2860 首乐曲」
+            // 曲集数直接写在标签上（如「曲集(12)」），顶栏不另报曲库总量
             t.setText(cat.tags.get(i).name + "(" + cat.tags.get(i).albums.size() + ")");
             t.setTypeface(Ui.titleFont(this));
             t.setTextSize(TypedValue.COMPLEX_UNIT_SP, Ui.sp(this, sel ? 15f : 13f));
@@ -1671,8 +1671,8 @@ public class HomeActivity extends Activity {
                 runOnUiThread(() -> mHeadSub.setText("解包失败：" + t));
                 return;
             }
-            // 不再扫盘：左栏的「内置曲目」删掉后，曲谱只通过「曲集目录」和
-            // 「最近打开」两个入口出现，标题由打开时记进 SheetStore。
+            // 不扫盘：曲谱只通过「曲集目录」和「最近打开」两个入口出现，
+            // 标题由打开时记进 SheetStore。
             runOnUiThread(() -> {
                 mReady = true;
                 renderNav();

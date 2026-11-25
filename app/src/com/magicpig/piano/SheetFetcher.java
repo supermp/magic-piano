@@ -12,17 +12,11 @@ import java.util.List;
  * 曲谱由外部拷贝进来，放在应用专属外部目录：
  *     sdcard/Android/data/com.magicpig.piano/files/sheets/&lt;乐曲uuid&gt;/sheet.xml.enc
  * 日常由 tools/deploy.py / sync_devices.py 铺设，手工恢复用 unpack_backup.py。
- * 没有的乐曲点开就提示"乐曲不存在"，App 不会去下载。
- *
- * 【为什么不再内置下载】
- * 原版服务端取曲谱要带 60 天有效期的 JWT，过期就全量失效；而真正的离线版
- * 本就该一次铺完、之后零网络。所以下载链路（qiniu/private_download_url）、
- * 令牌常量与 SharedPreferences 存储**全部删掉**，连 INTERNET 权限都不再申请。
+ * 没有的乐曲点开就提示"乐曲不存在"；App 不申请 INTERNET，也没有任何下载链路。
  *
  * 【目录优先级】
  *   1) 应用专属外部目录 sdcard/Android/data/…/files/sheets —— 主力位置，容量大
- *   2) 内部 /data/data/…/files/sheets —— 只为兼容老版本下过的曲谱，只读不写
- *      （新版不再往这里写任何东西）
+ *   2) 内部 /data/data/…/files/sheets —— 兼容位置，只读
  *
  * 没选 OBB：它是只读的，而 native 的 decryptSheet() 必须拿到真实文件路径，
  * 读不了压缩包内的条目；而且单文件上限 2GB、本意是商店分发扩展包，不合适。

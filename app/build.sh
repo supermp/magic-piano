@@ -1,5 +1,5 @@
 #!/bin/bash
-# 免 Gradle 的极简 APK 构建：javac -> jar -> d8 -> aapt2 -> zipalign -> apksigner
+# 免 Gradle 的极简 APK 构建：javac → jar → d8 → aapt2 → pack.py → zipalign → apksigner
 # 注意 pipefail：下面大量 `... | tail` 会把被管命令的退出码吞掉，
 # aapt2 报错时必须让管道失败停下，不能产出 0 字节 APK 还打印"完成"。
 set -e
@@ -26,40 +26,31 @@ PY="${PYTHON:-python3}"
 
 cd "$(dirname "$0")"
 echo "=== [0/6] 清理与补丁校验 ==="
-# 渲染器补丁靠字符串替换，锚点缺失会让 buildHtml 抛异常、播放页空白；
-# 先校验 app/assets/sheetShow 的锚点，缺失直接中止构建。
+# 渲染器 JS 语法错或补丁锚点缺失都会让播放页白屏；
+# 先在 app/assets/sheetShow 上做语法与锚点校验，任一失败直接中止构建。
 "$PY" "$ROOT_DIR/tools/check_sheet_patches.py"
 
-# 刻意不做 `rm -rf build`：沙箱会拦截批量删除，而且 build/ 里全是本脚本的产物，
-# 每一步（javac / d8 / aapt2 / zipalign / apksigner）都是整文件覆盖，留着旧的
-# 无害。唯一副作用：删掉某个 .java 后，它上次编译出的 .class 还会被 dex 进去
-# —— 遇到这种情况手动删一下 build/classes 即可。
+# 不整目录 `rm -rf build`：这里全是本脚本的产物，逐目录、逐文件清理更可控。
 mkdir -p build/classes build/dex build/out build/dexout
-# 【坑】javac 是**隐式编译**：只传源码文件时，若某个 .class 比它的 .java 还"新"
-# （mtime 只到秒，同一分钟内改完再编译就会判成"没变"），javac 会直接跳过它。
-# 表现是：源码改了、脚本也打印"完成"、APK 也装上了，但行为完全没变 ——
-# 踩过：新方法没进 dex、行为完全没变，排查半天。
-# 编译前清空 class 目录，全量重编，杜绝此类"幽灵改动"。
-# 注意：这里**不能用 rm -rf** —— 平台的批量删除保护会把"单次删 >50 个文件"
-# 当成危险操作拦下来（classes 里有 55 个 class），脚本会卡在第 0 步。
-# 改成逐个删：-exec rm -f {} \; 每次只传一个文件。
+# javac 是**隐式编译**：只传源码文件时，若某个 .class 比它的 .java 还"新"
+# （mtime 只到秒），javac 会跳过不编 —— 源码改了、APK 行为却没变。
+# 所以每次构建前清空 build/classes 全量重编，杜绝这种"幽灵改动"。
+# 不用 rm -rf：classes 里几十个文件，逐文件删不会误伤整个目录。
 if [ -d build/classes ]; then
   find build/classes -type f -exec rm -f {} \;
   find build/classes -depth -type d -exec rmdir {} \; 2>/dev/null || true
 fi
 mkdir -p build/classes
-# javac 只会覆盖"还有源码"的类；删掉/改名的 .java 会留下旧 .class 被打进 dex
-# （改包名 com.offline.piano → com.magicpig.piano 后就踩过：dex 里同时存在两套类；
-#   后来 CollectionDetailActivity → AlbumDetailActivity 改名又踩了一次 ——
-#   同一个包里失效的 .class 文件同样会被打包，且死类的字符串还会进 dex）。
-# 1) 先把 src 里已不存在的包整个删掉；
-# 2) 再逐个 .class 检查：src 里没有同名 .java 的一律删掉（覆盖内部类 X$Y）。
+# javac 只覆盖"还有源码"的类：删掉或改名的 .java 会留下旧 .class 被打进 dex，
+# 同一包里失效的类也一样，死类的字符串还会留在 dex 里。清理顺序：
+# 1) src 里已不存在的包整个删掉；
+# 2) 逐个 .class 对照：src 里没有同名 .java 的一律删掉（覆盖内部类 X$Y）。
 for d in build/classes/com/*/; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
     if [ "$name" != "mangofuture" ] && [ ! -d "src/com/$name" ]; then
         echo "    清理失效包：com/$name"
-        # 同样避免 rm -rf（批量删除会被平台拦），逐个删
+        # 同样逐文件删，不用 rm -rf
         find "$d" -type f -exec rm -f {} \;
         find "$d" -depth -type d -exec rmdir {} \; 2>/dev/null || true
     fi

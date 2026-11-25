@@ -40,7 +40,7 @@ magic-piano/
 ├── local.env.example          # 配置模板；真实 local.env 不入库
 ├── app/
 │   ├── src/                   # Java 源码
-│   ├── build.sh               # javac → d8 → aapt2 → pack.py → zipalign → apksigner
+│   ├── build.sh               # javac → jar → d8 → aapt2 → pack.py → zipalign → apksigner
 │   ├── pack.py / version.py / adbw.sh
 │   ├── AndroidManifest.xml
 │   ├── assets/                # 本地第三方运行资产；不入库
@@ -94,7 +94,8 @@ python tools/deploy.py --apk-only --serial <serial>
 - 文件名用 versionName，同一天多次构建会重名覆盖；先后只能看 versionCode（见「版本号」）。
 - 开发资产包 `dist/magicpiano-runtime-assets.zip`（文件名固定）解压到仓库根目录，再生成图片、构建。
 - 交付物统一放 `dist/`；`deploy.py` / `sync_devices.py` 默认取最新的 `magicpiano-*.apk`（可用 `--apk` 指定）。
-- `build.sh` 开头先跑 `tools/check_sheet_patches.py`；`SheetView` 对渲染器的字符串补丁锚点缺失会直接中止构建。
+- `build.sh` 开头先跑 `tools/check_sheet_patches.py`（渲染器 JS 语法 + 补丁锚点）；
+  `pack.py` 打包前校验 `app/assets` 关键资产存在且非空（algo_assets / fonts / sheetShow / ui），缺任一项直接中止。
 - 改 Java 后必须全量重编。`build.sh` 会清理旧 class，避免隐式编译留下失效类。
 - 改 `app/assets/algo_assets/**` 后同时递增 `AppAssets.VERSION`，否则设备仍使用已解压的旧副本。
 - `app/version-code.txt` 由版本脚本维护，不入库。
@@ -174,13 +175,9 @@ python tools/deploy.py --apk-only --serial <serial>
 
 `SheetView.buildHtml()` 内联 `sheet_show.html`、`jsbridge.js`、`sheet_show.js` 和补丁。这里改坏会导致整页空白。
 
-- 改拼接 JS 后必须做语法检查；改 `sheet_show.js` 后执行：
-
-  ```bash
-  node -e "new Function(require('fs').readFileSync('app/assets/sheetShow/sheet_show.js','utf8'))"
-  ```
-
-- 改 `sheet_show.js` / `sheet_show.html` 后还要跑 `python tools/check_sheet_patches.py`；`build.sh` 每次构建也会先跑，锚点缺失直接失败。`buildHtml` 运行期未命中同样直接抛错（不是只打日志）。
+- 改渲染器 JS（`sheet_show.js` / `jsbridge.js`）或 `sheet_show.html` 后跑 `python tools/check_sheet_patches.py`：
+  内含 `node --check` 语法校验（没装 node 会跳过并提示）与补丁锚点校验；`build.sh` 每次构建也会先跑，
+  任一失败即中止。`buildHtml` 运行期未命中同样直接抛错（不是只打日志）。
 - 改 `buildHtml` 里的补丁匹配串时同步更新 `tools/check_sheet_patches.py` 的 `PATCHES` 清单，否则构建期校验查的仍是旧锚点、照样通过，直到启动时才以空白页暴露。
 - Java→JS 明文 JSON 在桥接前保护 `%`，避免原桥 `decodeURIComponent` 抛 `URIError`；UTF-8 使用 `TextDecoder`。
 - 光标统一使用 `#sheet-cursor-preview` 金色胶囊；只有一套位置状态和一条阅读存档。
